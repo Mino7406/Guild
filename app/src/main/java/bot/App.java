@@ -18,7 +18,7 @@ public class App {
             // 봇 로그인 및 이벤트 리스너(Rathalos) 연결
             JDA jda = JDABuilder.createDefault(token)
                     .enableIntents(GatewayIntent.MESSAGE_CONTENT)
-                    .addEventListeners(new Rathalos()) // <--- 여기가 핵심! 봇에게 Rathalos 파일을 연결해 줍니다.
+                    .addEventListeners(new Monster()) // <--- 여기가 핵심! 봇에게 Rathalos 파일을 연결해 줍니다.
                     .build();
 
             // 봇이 완전히 켜질 때까지 대기
