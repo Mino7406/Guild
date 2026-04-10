@@ -8,10 +8,10 @@ import net.dv8tion.jda.api.interactions.commands.build.Commands;
 
 public class App {
     public static void main(String[] args) {
-        // 1. 발급받은 봇 토큰을 꼭 다시 넣어주세요!
+        // 봇 토큰
         String token = "MTQ5MDkzMzY5MDA2OTY4MDIzOA.GaU4ZA.KKbq15i-UxPrE_Ilb1K1QGnYt2mOLkxRDkkSY4"; 
         
-        // 2. 방금 복사한 디스코드 서버 ID를 넣어주세요! (예: "123456789012345678")
+        // 디스코드 서버 ID
         String guildId = "1282704020619661393"; 
 
         try {

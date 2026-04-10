@@ -46,7 +46,7 @@ public class Monster extends ListenerAdapter {
                 EmbedBuilder embed = new EmbedBuilder();
                 embed.setColor(new Color(184, 56, 56));
                 
-                // 이름 아래에 종, 위험도, 서식지를 깔끔하게 배치합니다.
+                // 이름 아래에 종, 위험도, 서식지를 배치합니다.
                 embed.setDescription(
                     "# " + monsterName + "\n" +
                     "**[ " + species + " ]**" + "\n\n\n" +
