@@ -160,7 +160,6 @@ public void onButtonInteraction(ButtonInteractionEvent event) {
         case "drop":
         case "dropLow":
         case "dropHigh":
-            String rank = action.equals("dropHigh") ? "상위" : "하위";
             String dataKey = action.equals("dropHigh") ? "drop_high" : "drop_low";
             
             // 만약 하위/상위 구분이 없는 구형 JSON이라면 기존 "drop" 키를 사용
