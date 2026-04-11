@@ -67,7 +67,7 @@ public class Monster extends ListenerAdapter {
                 return;
             }
 
-            // 💡 기본 정보 출력 (최초 검색 시)
+            // 기본 정보 출력 (최초 검색 시)
             sendBasicPage(event, null, monsterName, monsterData, false);
         }
     }
@@ -92,7 +92,7 @@ public class Monster extends ListenerAdapter {
 
         switch (action) {
             case "basic":
-                // 💡 기본 정보 탭 클릭 시
+                // 기본 정보 탭 클릭 시
                 sendBasicPage(null, event, monsterName, monsterData, true);
                 return;
 
@@ -105,8 +105,17 @@ public class Monster extends ListenerAdapter {
                 break;
 
             case "status":
-                embed.setDescription("# " + monsterName + "\n\n");
+                embed.setDescription("# " + monsterName + "\n");
+                
+                // 💡 1. 특수 공격을 맨 위로 배치하고, 가로 전체를 차지하게 만듭니다. (false)
+                if (monsterData.has("special_attack")) {
+                    embed.addField("**《몬스터의 특수 공격》**", monsterData.get("special_attack").getAsString(), false);
+                }
+
+                // 💡 2. 유효 상태 이상 (왼쪽 절반 차지 - true)
                 embed.addField("**《유효 상태 이상》**", monsterData.get("status").getAsString(), true);
+                
+                // 💡 3. 유효 아이템 (오른쪽 절반 차지 - true)
                 embed.addField("**《유효 아이템》**", monsterData.get("item").getAsString(), true);
                 break;
         }
@@ -116,7 +125,7 @@ public class Monster extends ListenerAdapter {
              .queue();
     }
 
-    // 💡 [공통 메서드] 기본 정보 페이지를 구성하고 전송/수정합니다.
+    // [공통 메서드] 기본 정보 페이지를 구성하고 전송/수정합니다.
     private void sendBasicPage(SlashCommandInteractionEvent slashEvent, ButtonInteractionEvent buttonEvent, String monsterName, JsonObject monsterData, boolean isEdit) {
         EmbedBuilder embed = new EmbedBuilder();
         embed.setColor(new Color(184, 56, 56));
@@ -126,16 +135,14 @@ public class Monster extends ListenerAdapter {
         String threatLevel = monsterData.get("threat_level").getAsString();
         String habitat = monsterData.get("habitat").getAsString();
         
-        // 💡 JSON의 info 필드를 가져오며, 백틱 스타일이 이미 JSON에 포함되어 있으므로 그대로 출력합니다.
         String info = monsterData.has("info") ? monsterData.get("info").getAsString() : "정보가 없습니다.";
 
         embed.setDescription(
             "# " + monsterName + "\n" +
-            "**【 " + species + " 】**\n\n\n" +
+            "**【 " + species + " 】**\n" +
+            "\n" + info + "\n\n" +
             "**《위험도》**\n" + threatLevel + "\n" +
-            "**《서식지》**\n" + habitat + "\n" +
-            "**《설명》**\n" + info + "\n\n" +
-            "💡 **아래 버튼을 눌러 상세 정보를 확인하세요!**"
+            "**《서식지》**\n" + habitat + "\n\n"
         );
 
         if (isEdit) {

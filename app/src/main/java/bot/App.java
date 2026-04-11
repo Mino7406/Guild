@@ -15,10 +15,10 @@ public class App {
         String guildId = "1282704020619661393"; 
 
         try {
-            // 봇 로그인 및 이벤트 리스너(Rathalos) 연결
+            // 봇 로그인 및 이벤트 리스너 연결
             JDA jda = JDABuilder.createDefault(token)
                     .enableIntents(GatewayIntent.MESSAGE_CONTENT)
-                    .addEventListeners(new Monster()) // 봇에게 Rathalos 파일을 연결해 줍니다.
+                    .addEventListeners(new Monster())
                     .build();
 
             // 봇이 완전히 켜질 때까지 대기
