@@ -156,7 +156,7 @@ public class Monster extends ListenerAdapter {
                 break;
             case "status":
                 embed.setDescription(titleText);
-                if (monsterData.has("special_attack")) embed.addField("**《특수 공격》**", getArrayAsString(monsterData, "special_attack"), false);
+                if (monsterData.has("special_attack")) embed.addField("**《몬스터의 특수 공격》**", getArrayAsString(monsterData, "special_attack"), false);
                 embed.addField("**《유효 상태 이상》**", getArrayAsString(monsterData, "status"), true);
                 embed.addField("**《유효 아이템》**", getArrayAsString(monsterData, "item"), true);
                 break;
