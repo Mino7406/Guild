@@ -8,6 +8,7 @@ import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.commands.Command;
 import net.dv8tion.jda.api.interactions.commands.OptionMapping;
+import net.dv8tion.jda.api.interactions.components.ActionRow;
 import net.dv8tion.jda.api.interactions.components.buttons.Button;
 
 import com.google.gson.JsonObject;
@@ -128,42 +129,72 @@ public class Monster extends ListenerAdapter {
         }
     }
 
-    @Override
-    public void onButtonInteraction(ButtonInteractionEvent event) {
-        String[] parts = event.getComponentId().split("_");
-        if (parts.length < 2) return;
-        String action = parts[0];       
-        String monsterName = parts[1];  
-        JsonObject monsterData = getMonsterData(monsterName);
-        if (monsterData == null) return;
+// Monster.java 내 주요 수정 구간
 
-        EmbedBuilder embed = new EmbedBuilder();
-        embed.setColor(new Color(184, 56, 56));
-        if (monsterData.has("thumbnail")) embed.setThumbnail(monsterData.get("thumbnail").getAsString());
+@Override
+public void onButtonInteraction(ButtonInteractionEvent event) {
+    String[] parts = event.getComponentId().split("_");
+    if (parts.length < 2) return;
 
-        String icon = monsterData.has("icon") ? monsterData.get("icon").getAsString() + " " : "";
-        String titleText = "# " + icon + monsterName + "\n";
+    String action = parts[0];       
+    String monsterName = parts[1];  
+    JsonObject monsterData = getMonsterData(monsterName);
+    if (monsterData == null) return;
 
-        switch (action) {
-            case "basic":
-                sendBasicPage(null, event, monsterName, monsterData, true);
-                return;
-            case "hitzone":
-                embed.setDescription(titleText + "\n" + getArrayAsString(monsterData, "hitzone"));
-                break;
-            case "drop":
-                embed.setDescription(titleText + "\n" + getArrayAsString(monsterData, "drop"));
-                break;
-            case "status":
-                embed.setDescription(titleText);
-                if (monsterData.has("special_attack")) embed.addField("**《몬스터의 특수 공격》**", getArrayAsString(monsterData, "special_attack"), false);
-                embed.addField("**《유효 상태 이상》**", getArrayAsString(monsterData, "status"), true);
-                embed.addField("**《유효 아이템》**", getArrayAsString(monsterData, "item"), true);
-                break;
-        }
-        event.editMessageEmbeds(embed.build()).setActionRow(getTabButtons(action, monsterName)).queue();
+    EmbedBuilder embed = new EmbedBuilder();
+    embed.setColor(new Color(184, 56, 56));
+    if (monsterData.has("thumbnail")) embed.setThumbnail(monsterData.get("thumbnail").getAsString());
+
+    String icon = monsterData.has("icon") ? monsterData.get("icon").getAsString() + " " : "";
+    String titleText = "# " + icon + monsterName + "\n";
+
+    switch (action) {
+        case "basic":
+            sendBasicPage(null, event, monsterName, monsterData, true);
+            return;
+        case "hitzone":
+            embed.setDescription(titleText + "\n" + getArrayAsString(monsterData, "hitzone"));
+            break;
+            
+        // 💡 소재 정보 관련 케이스 통합 처리
+        case "drop":
+        case "dropLow":
+        case "dropHigh":
+            String rank = action.equals("dropHigh") ? "상위" : "하위";
+            String dataKey = action.equals("dropHigh") ? "drop_high" : "drop_low";
+            
+            // 만약 하위/상위 구분이 없는 구형 JSON이라면 기존 "drop" 키를 사용
+            if (!monsterData.has(dataKey)) dataKey = "drop";
+            
+            embed.setDescription(titleText + "\n" + getArrayAsString(monsterData, dataKey));
+                
+                event.editMessageEmbeds(embed.build())
+                     .setComponents(
+                         ActionRow.of(getTabButtons("drop", monsterName)),
+                         ActionRow.of(
+                             // 💡 .withEmoji를 사용하여 이모지를 따로 넣어줍니다.
+                             Button.success("dropLow_" + monsterName, "하위 소재 정보")
+                                   .withEmoji(Emoji.fromFormatted("<:Rank_3:1492424259262222356>")), 
+                             
+                             Button.success("dropHigh_" + monsterName, "상위 소재 정보")
+                                   .withEmoji(Emoji.fromFormatted("<:Rank_4:1492424261032214589>"))
+                     )
+                 ).queue();
+            return;
+
+        case "status":
+            embed.setDescription(titleText);
+            if (monsterData.has("special_attack")) embed.addField("**《몬스터의 특수 공격》**", getArrayAsString(monsterData, "special_attack"), false);
+            embed.addField("**《유효 상태 이상》**", getArrayAsString(monsterData, "status"), true);
+            embed.addField("**《유효 아이템》**", getArrayAsString(monsterData, "item"), true);
+            break;
     }
-
+    
+    // 일반 탭 클릭 시 (기본 정보, 육질 등)
+    event.editMessageEmbeds(embed.build())
+         .setActionRow(getTabButtons(action, monsterName))
+         .queue();
+}
     private void sendBasicPage(SlashCommandInteractionEvent slashEvent, ButtonInteractionEvent buttonEvent, String monsterName, JsonObject monsterData, boolean isEdit) {
         EmbedBuilder embed = new EmbedBuilder();
         embed.setColor(new Color(184, 56, 56));
