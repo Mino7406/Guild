@@ -1,8 +1,20 @@
 {
+  "color": "#b83838",
   "thumbnail": "https://media.discordapp.net/attachments/1492342873423609876/1492342949328060426/qfz_u9AKaQDUZyX3kHinBpYZJapnTAxyDTgo0QXIIs-Aq84BLS2fGxKneMwEJq02pr6G2oHSnKmeSh71gNYyPTWbVUUUTd4AGzpja3J9DH6j84rxzoAAkwjD0PLU7Y2TsTJOXdStW8y2qS72DdkDRQ.webp?ex=69dafc2d&is=69d9aaad&hm=10f859942fc5771a251ad067307fe42a376dadb0ff6e46acc27cd8101db5e61b&=&format=webp&width=320&height=320",
   "species": "비룡종",
   "threat_level": "**<:Rank_4:1492424261032214589>5　<:Rank:1492345611826102344>6　<:Rank:1492345611826102344>9**",
-  "habitat": "**『<:Map_2:1492095401342271662> 주홍빛 숲』　『<:Map_3:1492095399433867395> 기름솟는 계곡』　『<:Map_5:1492095404492329100> 용도의 폐허』**",
+  "habitat": "**<:Map_2:1492095401342271662> 주홍빛 숲　<:Map_3:1492095399433867395> 기름솟는 계곡　<:Map_5:1492095404492329100> 용도의 폐허**",
+  "breakable_parts": [
+    "**<:Wing:1493197053206069269> 양쪽 날개**",
+    "**<:Tail:1493197018523238421> 꼬리**"
+  ],
+  "weak_point": [
+    "**<:Head:1493197013515239515> 입**"
+  ],
+  "element_weakness": [
+    "**<:Thunder:1492113723635142707> 번개**",
+    "**<:Dragon:1492113718954168410> 용🔺**"
+  ],
   "info": [
     "> **하늘의 왕자라 불리며 경외시되는 비룡. 자화룡과 함께 둥지를 중심으로 넓은 영역을 형성하고 하늘에서 감시한다.**",
     "> **침입자가 나타나면 우수한 비행 능력을 활용하여 하늘에서 급강하해 독을 품은 강력한 발톱으로 공격한다.**",

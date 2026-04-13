@@ -37,15 +37,15 @@ public class Monster extends ListenerAdapter {
         monsterAliases.put("레 다우", Arrays.asList("레다우", "레", "레황", "황뢰룡"));
         monsterAliases.put("우드 투나", Arrays.asList("우드", "우드투나", "참치", "나무참치", "나무 참치", "파의룡"));
         monsterAliases.put("누 이그드라", Arrays.asList("누", "누이그드라", "누따끄", "마따끄", "문어", "염옥소"));
-        monsterAliases.put("진 다하드", Arrays.asList("진다", "진다하드", "찐따하드", "이긴다 소프트", "동봉룡"));
+        monsterAliases.put("진 다하드", Arrays.asList("찐따", "진다", "진다하드", "찐따하드", "이긴다 소프트", "동봉룡"));
         monsterAliases.put("리오레우스", Arrays.asList("레우스", "리오", "화룡"));
         monsterAliases.put("조 시아", Arrays.asList("바퀴벌레", "조시아", "백열룡"));
         monsterAliases.put("고어 마가라", Arrays.asList("고어마가라", "고어", "마가라", "고아", "흑식룡"));
         monsterAliases.put("알슈베르도", Arrays.asList("알슈", "뉴트리아", "나타", "쇄인룡"));
         monsterAliases.put("타마미츠네", Arrays.asList("타마", "미츠네", "여우", "거품", "포호룡"));
         monsterAliases.put("라기아크루스", Arrays.asList("라기", "라기아", "악어", "수중전", "해룡"));
-        monsterAliases.put("셀레기오스", Arrays.asList("셀레기", "제트킥", "째트킥", "셀레", "칼날비늘","천인룡"));
-        monsterAliases.put("오메가 플라네테스", Arrays.asList("오메가", "파판", "파이널판타지", "파이널 판타지", "기계", "메카", "풍뎅이", "메카풍뎅이", "병신"));
+        monsterAliases.put("셀레기오스", Arrays.asList("셀레기", "제트킥", "째트킥", "셀레", "칼날비늘", "천인룡"));
+        monsterAliases.put("오메가 플라네테스",Arrays.asList("오메가", "파판", "파이널판타지", "파이널 판타지", "기계", "메카", "풍뎅이", "메카풍뎅이", "병신"));
         monsterAliases.put("고그마지오스", Arrays.asList("고그마", "고구마", "거극룡", "거극", "파룡포", "기름"));
     }
 
@@ -161,7 +161,17 @@ public class Monster extends ListenerAdapter {
             return;
 
         EmbedBuilder embed = new EmbedBuilder();
-        embed.setColor(new Color(184, 56, 56));
+
+        try {
+            if (monsterData.has("color")) {
+                embed.setColor(Color.decode(monsterData.get("color").getAsString()));
+            } else {
+                embed.setColor(new Color(255, 255, 255));
+            }
+        } catch (Exception e) {
+            embed.setColor(new Color(255, 255, 255));
+        }
+
         if (monsterData.has("thumbnail"))
             embed.setThumbnail(monsterData.get("thumbnail").getAsString());
 
@@ -177,141 +187,151 @@ public class Monster extends ListenerAdapter {
             break;
 
         // 💡 소재 정보 관련 케이스 통합 처리
-// 💡 소재 정보 탭 (하위/상위 구분 여부 체크 로직 추가)
-            case "drop":
-            case "dropLow":
-            case "dropHigh":
-                // 1. JSON 파일에 하위/상위 구분이 있는지(drop_low 키가 있는지) 확인합니다.
-                boolean hasRankInfo = monsterData.has("drop_low");
-                
-                String dataKey = "drop"; // 기본값은 통합 소재(drop)
-                if (hasRankInfo) {
-                    dataKey = action.equals("dropHigh") ? "drop_high" : "drop_low";
-                }
-                
-                embed.setDescription(titleText + "\n" + getArrayAsString(monsterData, dataKey));
-                
-                if (hasRankInfo) {
-                    // 2. 하위/상위 구분이 【있는】 몬스터 (예: 레 다우)
-                    event.editMessageEmbeds(embed.build())
-                         .setComponents(
-                             // 첫 번째 줄 (위): 하위/상위 소재 버튼
-                             ActionRow.of(
-                                 Button.success("dropLow_" + monsterName, "《 하위 》")
-                                       .withEmoji(Emoji.fromFormatted("<:Rank_3:1492424259262222356>")), 
-                                 Button.success("dropHigh_" + monsterName, "《 상위 》")
-                                       .withEmoji(Emoji.fromFormatted("<:Rank_4:1492424261032214589>"))
-                             ),
-                             // 두 번째 줄 (아래): 메인 탭 버튼
-                             ActionRow.of(getTabButtons("drop", monsterName))
-                         ).queue();
-                } else {
-                    // 3. 하위/상위 구분이 【없는】 몬스터 (예: 리오레우스)
-                    event.editMessageEmbeds(embed.build())
-                         // 메인 탭 버튼만 출력 (서브 버튼 없음)
-                         .setActionRow(getTabButtons("drop", monsterName))
-                         .queue();
-                }
-                return;
+        // 💡 소재 정보 탭 (하위/상위 구분 여부 체크 로직 추가)
+        case "drop":
+        case "dropLow":
+        case "dropHigh":
+            // 1. JSON 파일에 하위/상위 구분이 있는지(drop_low 키가 있는지) 확인합니다.
+            boolean hasRankInfo = monsterData.has("drop_low");
 
-// 💡 상태이상 정보 탭 (소제목 + 인용구 리스트 방식)
-// 💡 상태이상 정보 탭 (인식은 원본으로, 출력은 깔끔하게)
-            case "status":
-                List<String> star3 = new ArrayList<>();
-                List<String> star2 = new ArrayList<>();
-                List<String> star1 = new ArrayList<>();
-                List<String> star0 = new ArrayList<>();
+            String dataKey = "drop"; // 기본값은 통합 소재(drop)
+            if (hasRankInfo) {
+                dataKey = action.equals("dropHigh") ? "drop_high" : "drop_low";
+            }
 
-                if (monsterData.has("status")) {
-                    monsterData.getAsJsonArray("status").forEach(el -> {
-                        // 1. JSON 원본 데이터를 그대로 가져옵니다. (인식용)
-                        String originalStr = el.getAsString();
-                        
-                        // 2. 출력용 데이터: 정규식을 사용해 띄어쓰기 특수문자(　)와 " (⭐⭐)" 같은 괄호 덩어리를 싹 지웁니다.
-                        String cleanStr = "> " + originalStr.replaceAll("[　\\s]*\\(.*?\\)", "").trim();
+            embed.setDescription(titleText + "\n" + getArrayAsString(monsterData, dataKey));
 
-                        // 3. 분류할 때는 원본(originalStr)에 있는 별 개수로 똑똑하게 판단해서 넣습니다!
-                        if (originalStr.contains("⭐⭐⭐")) star3.add(cleanStr);
-                        else if (originalStr.contains("⭐⭐")) star2.add(cleanStr);
-                        else if (originalStr.contains("⭐")) star1.add(cleanStr);
-                        else star0.add(cleanStr);
-                    });
-                }
-
-                StringBuilder statusDesc = new StringBuilder(titleText + "\n");
-                
-                // 4. 소제목은 사진처럼 아주 심플하게 변경했습니다.
-                if (!star3.isEmpty()) statusDesc.append("**《 ⭐⭐⭐ 》**\n").append(String.join("\n", star3)).append("\n\n");
-                if (!star2.isEmpty()) statusDesc.append("**《 ⭐⭐ 》**\n").append(String.join("\n", star2)).append("\n\n");
-                if (!star1.isEmpty()) statusDesc.append("**《 ⭐ 》**\n").append(String.join("\n", star1)).append("\n\n");
-                if (!star0.isEmpty()) statusDesc.append("**《 ❌ 》**\n").append(String.join("\n", star0)).append("\n\n");
-
-// --- 특수 공격 처리 (기존과 동일) ---
-// --- 특수 공격 처리 (기존과 동일) ---
-                if (monsterData.has("special_attack")) {
-                    statusDesc.append("**《 몬스터의 특수 공격 》**\n");
-                    monsterData.getAsJsonArray("special_attack").forEach(el -> {
-                        statusDesc.append("> ").append(el.getAsString()).append("\n");
-                    });
-                    statusDesc.append("\n");
-                }
-                
-                // 💡 유효 아이템 처리 (상태이상과 동일하게 소제목 + 인용구 세로 리스트 적용)
-                if (monsterData.has("item")) {
-                    List<String> validItems = new ArrayList<>();   // ⭕ 리스트
-                    List<String> invalidItems = new ArrayList<>(); // ❌ 리스트
-
-                    monsterData.getAsJsonArray("item").forEach(el -> {
-                        String originalStr = el.getAsString();
-                        
-                        // 뒤에 붙은 " (⭕)", " (❌)"를 지우고 앞에 인용구(> )를 붙입니다.
-                        String cleanStr = "> " + originalStr.replaceAll("[　\\s]*\\(.*?\\)", "").trim();
-
-                        // 기호에 따라 자동 분류
-                        if (originalStr.contains("⭕")) validItems.add(cleanStr);
-                        else if (originalStr.contains("❌")) invalidItems.add(cleanStr);
-                        else validItems.add(cleanStr); // 혹시 모를 기호 누락 시 기본값
-                    });
-
-                    // ⭕ 유효 아이템 리스트 출력
-                    if (!validItems.isEmpty()) {
-                        statusDesc.append("**《 ⭕ 유효 아이템 》**\n")
-                                  .append(String.join("\n", validItems))
-                                  .append("\n\n");
-                    }
-                    
-                    // ❌ 사용 불가 아이템 리스트 출력
-                    if (!invalidItems.isEmpty()) {
-                        statusDesc.append("**《 ❌ 무효 아이템 》**\n")
-                                  .append(String.join("\n", invalidItems))
-                                  .append("\n\n");
-                    }
-                }
-
-                // 완성된 텍스트를 임베드에 삽입
-                embed.setDescription(statusDesc.toString().trim());
-
-                // 하위/상위 버튼처럼 추가 버튼 없이 메인 탭 한 줄만 깔끔하게 띄움
+            if (hasRankInfo) {
+                // 2. 하위/상위 구분이 【있는】 몬스터 (예: 레 다우)
+                event.editMessageEmbeds(embed.build()).setComponents(
+                        // 첫 번째 줄 (위): 하위/상위 소재 버튼
+                        ActionRow.of(
+                                Button.success("dropLow_" + monsterName, "《 하위 》")
+                                        .withEmoji(Emoji.fromFormatted("<:Rank_3:1492424259262222356>")),
+                                Button.success("dropHigh_" + monsterName, "《 상위 》")
+                                        .withEmoji(Emoji.fromFormatted("<:Rank_4:1492424261032214589>"))),
+                        // 두 번째 줄 (아래): 메인 탭 버튼
+                        ActionRow.of(getTabButtons("drop", monsterName))).queue();
+            } else {
+                // 3. 하위/상위 구분이 【없는】 몬스터 (예: 리오레우스)
                 event.editMessageEmbeds(embed.build())
-                     .setActionRow(getTabButtons("status", monsterName))
-                     .queue();
-                return;
-            } // <--- switch 문 종료
+                        // 메인 탭 버튼만 출력 (서브 버튼 없음)
+                        .setActionRow(getTabButtons("drop", monsterName)).queue();
+            }
+            return;
+
+        // 💡 상태이상 정보 탭 (소제목 + 인용구 리스트 방식)
+        // 💡 상태이상 정보 탭 (인식은 원본으로, 출력은 깔끔하게)
+        case "status":
+            List<String> star3 = new ArrayList<>();
+            List<String> star2 = new ArrayList<>();
+            List<String> star1 = new ArrayList<>();
+            List<String> star0 = new ArrayList<>();
+
+            if (monsterData.has("status")) {
+                monsterData.getAsJsonArray("status").forEach(el -> {
+                    // 1. JSON 원본 데이터를 그대로 가져옵니다. (인식용)
+                    String originalStr = el.getAsString();
+
+                    // 2. 출력용 데이터: 정규식을 사용해 띄어쓰기 특수문자( )와 " (⭐⭐)" 같은 괄호 덩어리를 싹 지웁니다.
+                    String cleanStr = "> " + originalStr.replaceAll("[　\\s]*\\(.*?\\)", "").trim();
+
+                    // 3. 분류할 때는 원본(originalStr)에 있는 별 개수로 똑똑하게 판단해서 넣습니다!
+                    if (originalStr.contains("⭐⭐⭐"))
+                        star3.add(cleanStr);
+                    else if (originalStr.contains("⭐⭐"))
+                        star2.add(cleanStr);
+                    else if (originalStr.contains("⭐"))
+                        star1.add(cleanStr);
+                    else
+                        star0.add(cleanStr);
+                });
+            }
+
+            StringBuilder statusDesc = new StringBuilder(titleText + "\n");
+
+            // 4. 소제목은 사진처럼 아주 심플하게 변경했습니다.
+            if (!star3.isEmpty())
+                statusDesc.append("**《 ⭐⭐⭐ 》**\n").append(String.join("\n", star3)).append("\n\n");
+            if (!star2.isEmpty())
+                statusDesc.append("**《 ⭐⭐ 》**\n").append(String.join("\n", star2)).append("\n\n");
+            if (!star1.isEmpty())
+                statusDesc.append("**《 ⭐ 》**\n").append(String.join("\n", star1)).append("\n\n");
+            if (!star0.isEmpty())
+                statusDesc.append("**《 ❌ 》**\n").append(String.join("\n", star0)).append("\n\n");
+
+            // --- 특수 공격 처리 (기존과 동일) ---
+            // --- 특수 공격 처리 (기존과 동일) ---
+            if (monsterData.has("special_attack")) {
+                statusDesc.append("**《 몬스터의 특수 공격 》**\n");
+                monsterData.getAsJsonArray("special_attack").forEach(el -> {
+                    statusDesc.append("> ").append(el.getAsString()).append("\n");
+                });
+                statusDesc.append("\n");
+            }
+
+            // 💡 유효 아이템 처리 (상태이상과 동일하게 소제목 + 인용구 세로 리스트 적용)
+            if (monsterData.has("item")) {
+                List<String> validItems = new ArrayList<>(); // ⭕ 리스트
+                List<String> invalidItems = new ArrayList<>(); // ❌ 리스트
+
+                monsterData.getAsJsonArray("item").forEach(el -> {
+                    String originalStr = el.getAsString();
+
+                    // 뒤에 붙은 " (⭕)", " (❌)"를 지우고 앞에 인용구(> )를 붙입니다.
+                    String cleanStr = "> " + originalStr.replaceAll("[　\\s]*\\(.*?\\)", "").trim();
+
+                    // 기호에 따라 자동 분류
+                    if (originalStr.contains("⭕"))
+                        validItems.add(cleanStr);
+                    else if (originalStr.contains("❌"))
+                        invalidItems.add(cleanStr);
+                    else
+                        validItems.add(cleanStr); // 혹시 모를 기호 누락 시 기본값
+                });
+
+                // ⭕ 유효 아이템 리스트 출력
+                if (!validItems.isEmpty()) {
+                    statusDesc.append("**《 ⭕ 유효 아이템 》**\n").append(String.join("\n", validItems)).append("\n\n");
+                }
+
+                // ❌ 사용 불가 아이템 리스트 출력
+                if (!invalidItems.isEmpty()) {
+                    statusDesc.append("**《 ❌ 무효 아이템 》**\n").append(String.join("\n", invalidItems)).append("\n\n");
+                }
+            }
+
+            // 완성된 텍스트를 임베드에 삽입
+            embed.setDescription(statusDesc.toString().trim());
+
+            // 하위/상위 버튼처럼 추가 버튼 없이 메인 탭 한 줄만 깔끔하게 띄움
+            event.editMessageEmbeds(embed.build()).setActionRow(getTabButtons("status", monsterName)).queue();
+            return;
+        } // <--- switch 문 종료
 
         // 일반 탭 클릭 시 (육질 등 break; 로 빠져나오는 케이스 처리용)
-        event.editMessageEmbeds(embed.build())
-             .setActionRow(getTabButtons(action, monsterName))
-             .queue();
-             
+        event.editMessageEmbeds(embed.build()).setActionRow(getTabButtons(action, monsterName)).queue();
+
     } // <--- onButtonInteraction 메서드 종료 // <--- onButtonInteraction 메서드 종료
 
-        // 일반 탭 클릭 시 (기본 정보, 육질 등)
+    // 일반 탭 클릭 시 (기본 정보, 육질 등)
     private void sendBasicPage(SlashCommandInteractionEvent slashEvent, ButtonInteractionEvent buttonEvent,
             String monsterName, JsonObject monsterData, boolean isEdit) {
         EmbedBuilder embed = new EmbedBuilder();
-        embed.setColor(new Color(184, 56, 56));
+
+        try {
+            if (monsterData.has("color")) {
+                embed.setColor(Color.decode(monsterData.get("color").getAsString()));
+            } else {
+                embed.setColor(new Color(184, 56, 56));
+            }
+        } catch (Exception e) {
+            embed.setColor(new Color(184, 56, 56));
+        }
+
         if (monsterData.has("thumbnail"))
             embed.setThumbnail(monsterData.get("thumbnail").getAsString());
+        
 
         String icon = monsterData.has("icon") ? monsterData.get("icon").getAsString() + " " : "";
         String species = monsterData.get("species").getAsString();
@@ -319,8 +339,63 @@ public class Monster extends ListenerAdapter {
         String info = getArrayAsString(monsterData, "info");
         String habitat = monsterData.has("habitat") ? monsterData.get("habitat").getAsString() : "정보 없음";
 
-        embed.setDescription("# " + icon + monsterName + "\n" + "**【 " + species + " 】**\n\n" + info + "\n\n"
-                + "**《위험도》**\n" + threatLevel + "\n\n" + "**《서식지》**\n" + habitat);
+        // 💡 StringBuilder를 사용하여 기본 정보 텍스트를 깔끔하게 조립합니다.
+        // 💡 StringBuilder를 사용하여 기본 정보 텍스트를 깔끔하게 조립합니다.
+        StringBuilder basicDesc = new StringBuilder();
+        basicDesc.append("# ").append(icon).append(monsterName).append("\n");
+        basicDesc.append("**【 ").append(species).append(" 】**\n\n");
+        basicDesc.append(info).append("\n\n");
+
+        // 💡 서식지와 위험도에도 인용구(> ) 디자인을 적용했습니다.
+        // 💡 서식지와 위험도에도 인용구(> ) 디자인을 적용했습니다.
+        basicDesc.append("**《 서식지 》**\n> ").append(habitat).append("\n\n");
+        basicDesc.append("**《 위험도 》**\n> ").append(threatLevel).append("\n\n");
+
+        // 💡 새로 추가된 핵심 전투 정보 3종 세트 (배열이든 여러 줄 문자열이든 완벽하게 세로 정렬!)
+        if (monsterData.has("breakable_parts")) {
+            basicDesc.append("**《 파괴/절단 가능 부위 》**\n");
+            if (monsterData.get("breakable_parts").isJsonArray()) {
+                monsterData.getAsJsonArray("breakable_parts").forEach(el -> 
+                    // JSON 내부에 실수로 들어간 \n을 제거하고 깔끔하게 한 줄씩 출력
+                    basicDesc.append("> ").append(el.getAsString().replace("\n", "").trim()).append("\n")
+                );
+            } else {
+                for (String line : monsterData.get("breakable_parts").getAsString().split("\n")) {
+                    basicDesc.append("> ").append(line.trim()).append("\n");
+                }
+            }
+            basicDesc.append("\n");
+        }
+        
+        if (monsterData.has("weak_point")) {
+            basicDesc.append("**《 약점 》**\n");
+            if (monsterData.get("weak_point").isJsonArray()) {
+                monsterData.getAsJsonArray("weak_point").forEach(el -> 
+                    basicDesc.append("> ").append(el.getAsString().replace("\n", "").trim()).append("\n")
+                );
+            } else {
+                for (String line : monsterData.get("weak_point").getAsString().split("\n")) {
+                    basicDesc.append("> ").append(line.trim()).append("\n");
+                }
+            }
+            basicDesc.append("\n");
+        }
+
+        if (monsterData.has("element_weakness")) {
+            basicDesc.append("**《 추천 속성 》**\n");
+            if (monsterData.get("element_weakness").isJsonArray()) {
+                monsterData.getAsJsonArray("element_weakness").forEach(el -> 
+                    basicDesc.append("> ").append(el.getAsString().replace("\n", "").trim()).append("\n")
+                );
+            } else {
+                for (String line : monsterData.get("element_weakness").getAsString().split("\n")) {
+                    basicDesc.append("> ").append(line.trim()).append("\n");
+                }
+            }
+            basicDesc.append("\n");
+        }
+
+        embed.setDescription(basicDesc.toString().trim());
 
         if (isEdit) {
             buttonEvent.editMessageEmbeds(embed.build()).setActionRow(getTabButtons("basic", monsterName)).queue();

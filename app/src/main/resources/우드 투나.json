@@ -1,8 +1,20 @@
 {
+    "color": "#4e47e2",
     "thumbnail": "https://media.discordapp.net/attachments/1492342873423609876/1493126928700543110/gO168Ng84CHR-hDBA3EwU8GbLQVAdQFPaShpK3vmskSPAcOrV6rGjQz6wKsZm-9Xvc_tfA3FfgnNM-K9CrgDvzzm5fy0VK0bwIkt63pIUTyi318c9X2fCepD1Ry3IzAwuTen2ODuBnq5kGoupUjp_g.png?ex=69ddd650&is=69dc84d0&hm=4942342d36ef4672e632d59fccd917af47806aad3fda9c936a052b6ebed1a5ab&=&format=webp&quality=lossless&width=205&height=205",
     "species": "해룡종",
     "threat_level": "**<:Rank_3:1492424259262222356>2　<:Rank_4:1492424261032214589>6　<:Rank:1492345611826102344>7　<:Rank:1492345611826102344>8　<:Rank:1492345611826102344>9　<:Rank_2:1492382806616309850>8　<:Rank_2:1492382806616309850>10**",
-    "habitat": "**『<:Map_2:1492095404572016640> 주홍빛 숲』**",
+    "habitat": "**<:Map_2:1492095401342271662> 주홍빛 숲**",
+    "breakable_parts": [
+      "**<:Head:1493197013515239515> 머리**",
+      "**<:Part:1493197015121662002> 앞다리**",
+      "**<:Tail:1493197018523238421> 꼬리**"
+    ],
+    "weak_point": [
+      "**<:Head:1493197013515239515> 입**"
+    ],
+    "element_weakness": [
+      "**<:Thunder:1492113723635142707> 번개**"
+    ],
     "info": [
       "> **주홍빛 숲 생태계의 정점에 선 해룡종.**",
       "> **풍부한 물에 적응 하였으며 집중 호우 때 자주 목격된다.**",

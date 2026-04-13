@@ -1,8 +1,21 @@
 {
-    "thumbnail": "https://media.discordapp.net/attachments/1492342873423609876/1492382026458988724/aePeguRsnGPZkYzBe3Ep5k6qO-PIXEFv1VtBUF9DjHLwyFqtNer9NRrTklaXYjUUzCUn6Ok8kHtJPZStRzfHkdyvxwD4YK7qh9mJ_1RaLqG31pIiRkTCXNJ3lEYW593GBpk3DyAGVEGLx85DRZE3RQ.webp?ex=69db2092&is=69d9cf12&hm=29549cf43bcea7a355be419a839713138b6d27cf2ddcfb7350a2e1fda6bb1c9d&=&format=webp&width=320&height=320",
-    "species": "비룡종",
-    "threat_level": "**<:Rank_3:1492424259262222356>2　<:Rank_4:1492424261032214589>6　<:Rank:1492345611826102344>7　<:Rank:1492345611826102344>8　<:Rank:1492345611826102344>9　<:Rank_2:1492382806616309850>8　<:Rank_2:1492382806616309850>10**",
-    "habitat": "**『<:Map_1:1492095402999152710> 경계의 모래 평원』**",
+  "color": "#F1C40F",
+  "thumbnail": "https://media.discordapp.net/attachments/1492342873423609876/1492382026458988724/aePeguRsnGPZkYzBe3Ep5k6qO-PIXEFv1VtBUF9DjHLwyFqtNer9NRrTklaXYjUUzCUn6Ok8kHtJPZStRzfHkdyvxwD4YK7qh9mJ_1RaLqG31pIiRkTCXNJ3lEYW593GBpk3DyAGVEGLx85DRZE3RQ.webp?ex=69db2092&is=69d9cf12&hm=29549cf43bcea7a355be419a839713138b6d27cf2ddcfb7350a2e1fda6bb1c9d&=&format=webp&width=320&height=320",
+  "species": "비룡종",
+  "threat_level": "**<:Rank_3:1492424259262222356>2　<:Rank_4:1492424261032214589>6　<:Rank:1492345611826102344>7　<:Rank:1492345611826102344>8　<:Rank:1492345611826102344>9　<:Rank_2:1492382806616309850>8　<:Rank_2:1492382806616309850>10**",
+  "habitat": "**<:Map_1:1492095402999152710> 경계의 모래 평원**",
+  "breakable_parts": [
+    "**<:Head:1493197013515239515> 머리**",
+    "**<:Wing:1493197053206069269> 양쪽 날개**",
+    "**<:Tail:1493197018523238421> 꼬리**"
+  ],
+  "weak_point": [
+    "**<:Head:1493197013515239515> 머리**"
+  ],
+  "element_weakness": [
+    "**<:Water:1492113725434630155> 물**",
+    "**<:Ice:1492113721881788476> 얼음🔺**"
+  ],
     "info": [
       "> **모래 평원의 생태계 정점에 선 비룡종.**",
       "> **대규모 낙뢰를 동반하는 모래폭풍에 적응했으며 해당 날씨에 자주 목격된다.**",
