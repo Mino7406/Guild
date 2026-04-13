@@ -24,8 +24,8 @@ public class App {
 
             // 💡 끝부분의 (..., true, true) 중 마지막 true가 "자동완성(Autocomplete) 켜기" 입니다.
             jda.getGuildById(guildId).updateCommands().addCommands(
-                Commands.slash("몬스터", "해당 몬스터의 육질표와 소재 드랍률을 확인합니다.")
-                        .addOption(OptionType.STRING, "이름", "검색할 몬스터의 이름을 입력하세요.", true, true)
+                Commands.slash("몬스터", "해당 몬스터의 정보를 확인합니다. (⚠️Beta - 현재 9성몹만 검색 가능합니다.) ")
+                        .addOption(OptionType.STRING, "이름", "검색할 몬스터의 이름을 입력하세요. [ ※ 별명이나 줄임말로도 검색 가능합니다. ]", true, true)
             ).queue();
             
             System.out.println("봇이 성공적으로 실행되었고, 테스트 서버에 명령어가 즉시 등록되었습니다!");
