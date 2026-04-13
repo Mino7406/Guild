@@ -27,10 +27,8 @@ import java.util.Map;
 public class Monster extends ListenerAdapter {
 
     // 💡 도감에 등록된 몬스터 공식 이름 목록 (새 몬스터 추가 시 여기에 이름 추가)
-    private final String[] monsterList = {
-        "레 다우", "우드 투나", "누 이그드라", "진 다하드", "리오레우스", "조 시아", 
-        "알슈베르도", "고어 마가라", "타마미츠네", "라기아크루스", "셀레기오스", "오메가 플라네테스", "고그마지오스"
-    };
+    private final String[] monsterList = { "레 다우", "우드 투나", "누 이그드라", "진 다하드", "리오레우스", "조 시아", "알슈베르도", "고어 마가라",
+            "타마미츠네", "라기아크루스", "셀레기오스", "오메가 플라네테스", "고그마지오스" };
 
     private final Map<String, List<String>> monsterAliases = new HashMap<>();
 
@@ -45,26 +43,29 @@ public class Monster extends ListenerAdapter {
         monsterAliases.put("고어 마가라", Arrays.asList("고어마가라", "고어", "마가라", "고아", "흑식룡"));
         monsterAliases.put("알슈베르도", Arrays.asList("알슈", "뉴트리아", "나타", "쇄인룡"));
         monsterAliases.put("타마미츠네", Arrays.asList("타마", "미츠네", "여우", "거품", "포호룡"));
-        monsterAliases.put("라기아크루스", Arrays.asList("라기", "라기아", "악어", "해룡"));
-        monsterAliases.put("셀레기오스", Arrays.asList("셀레기", "제트킥", "째트킥", "셀레", "천인룡"));
-        monsterAliases.put("오메가 플라네테스", Arrays.asList("오메가", "파판", "파이널판타지", "파이널 판타지", "기계", "메카", "풍뎅이", "병신"));
+        monsterAliases.put("라기아크루스", Arrays.asList("라기", "라기아", "악어", "수중전", "해룡"));
+        monsterAliases.put("셀레기오스", Arrays.asList("셀레기", "제트킥", "째트킥", "셀레", "칼날비늘","천인룡"));
+        monsterAliases.put("오메가 플라네테스", Arrays.asList("오메가", "파판", "파이널판타지", "파이널 판타지", "기계", "메카", "풍뎅이", "메카풍뎅이", "병신"));
         monsterAliases.put("고그마지오스", Arrays.asList("고그마", "고구마", "거극룡", "거극", "파룡포", "기름"));
     }
 
     private String resolveMonsterName(String input) {
         for (String official : monsterList) {
-            if (official.equals(input)) return official;
+            if (official.equals(input))
+                return official;
         }
         for (Map.Entry<String, List<String>> entry : monsterAliases.entrySet()) {
             for (String alias : entry.getValue()) {
-                if (alias.equals(input)) return entry.getKey();
+                if (alias.equals(input))
+                    return entry.getKey();
             }
         }
         return input;
     }
 
     private String getArrayAsString(JsonObject data, String key) {
-        if (!data.has(key)) return "정보가 없습니다.";
+        if (!data.has(key))
+            return "정보가 없습니다.";
         if (data.get(key).isJsonArray()) {
             List<String> lines = new ArrayList<>();
             data.getAsJsonArray(key).forEach(element -> lines.add(element.getAsString()));
@@ -76,18 +77,22 @@ public class Monster extends ListenerAdapter {
     @Override
     public void onCommandAutoCompleteInteraction(CommandAutoCompleteInteractionEvent event) {
         if (event.getName().equals("몬스터") && event.getFocusedOption().getName().equals("이름")) {
-            String currentInput = event.getFocusedOption().getValue().trim(); 
+            String currentInput = event.getFocusedOption().getValue().trim();
             List<Command.Choice> options = new ArrayList<>();
             for (String officialName : monsterList) {
                 boolean isMatch = officialName.contains(currentInput);
                 if (!isMatch && monsterAliases.containsKey(officialName)) {
                     for (String alias : monsterAliases.get(officialName)) {
-                        if (alias.contains(currentInput)) { isMatch = true; break; }
+                        if (alias.contains(currentInput)) {
+                            isMatch = true;
+                            break;
+                        }
                     }
                 }
                 if (isMatch) {
                     options.add(new Command.Choice(officialName, officialName));
-                    if (options.size() >= 25) break;
+                    if (options.size() >= 25)
+                        break;
                 }
             }
             event.replyChoices(options).queue();
@@ -98,21 +103,29 @@ public class Monster extends ListenerAdapter {
         try {
             String fileName = monsterName + ".json";
             InputStream is = getClass().getClassLoader().getResourceAsStream(fileName);
-            if (is == null) return null;
+            if (is == null)
+                return null;
             return JsonParser.parseReader(new InputStreamReader(is, StandardCharsets.UTF_8)).getAsJsonObject();
-        } catch (Exception e) { e.printStackTrace(); return null; }
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
     }
 
     private List<Button> getTabButtons(String currentTab, String monsterName) {
         List<Button> buttons = new ArrayList<>();
-        if (!currentTab.equals("basic")) 
-            buttons.add(Button.secondary("basic_" + monsterName, "기본 정보").withEmoji(Emoji.fromFormatted("<:Info_4:1492145251941482697>")));
-        if (!currentTab.equals("hitzone")) 
-            buttons.add(Button.primary("hitzone_" + monsterName, "육질 정보").withEmoji(Emoji.fromFormatted("<:Info_2:1492145248795758602>")));
-        if (!currentTab.equals("drop")) 
-            buttons.add(Button.success("drop_" + monsterName, "소재 정보").withEmoji(Emoji.fromFormatted("<:Info_1:1492145247327617185>")));
-        if (!currentTab.equals("status")) 
-            buttons.add(Button.danger("status_" + monsterName, "상태이상 정보").withEmoji(Emoji.fromFormatted("<:Info_3:1492145250192331015>")));
+        if (!currentTab.equals("basic"))
+            buttons.add(Button.secondary("basic_" + monsterName, "기본 정보")
+                    .withEmoji(Emoji.fromFormatted("<:Info_4:1492145251941482697>")));
+        if (!currentTab.equals("hitzone"))
+            buttons.add(Button.primary("hitzone_" + monsterName, "육질 정보")
+                    .withEmoji(Emoji.fromFormatted("<:Info_2:1492145248795758602>")));
+        if (!currentTab.equals("drop"))
+            buttons.add(Button.success("drop_" + monsterName, "소재 정보")
+                    .withEmoji(Emoji.fromFormatted("<:Info_1:1492145247327617185>")));
+        if (!currentTab.equals("status"))
+            buttons.add(Button.danger("status_" + monsterName, "상태이상 정보")
+                    .withEmoji(Emoji.fromFormatted("<:Info_3:1492145250192331015>")));
         return buttons;
     }
 
@@ -120,84 +133,185 @@ public class Monster extends ListenerAdapter {
     public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
         if (event.getName().equals("몬스터")) {
             OptionMapping option = event.getOption("이름");
-            if (option == null) return;
+            if (option == null)
+                return;
             String userInput = option.getAsString().trim();
-            String monsterName = resolveMonsterName(userInput); 
+            String monsterName = resolveMonsterName(userInput);
             JsonObject monsterData = getMonsterData(monsterName);
-            if (monsterData == null) { event.reply("❌ 데이터 없음: `" + userInput + "`").queue(); return; }
+            if (monsterData == null) {
+                event.reply("❌ 데이터 없음: `" + userInput + "`").queue();
+                return;
+            }
             sendBasicPage(event, null, monsterName, monsterData, false);
         }
     }
 
-// Monster.java 내 주요 수정 구간
+    // Monster.java 내 주요 수정 구간
 
-@Override
-public void onButtonInteraction(ButtonInteractionEvent event) {
-    String[] parts = event.getComponentId().split("_");
-    if (parts.length < 2) return;
+    @Override
+    public void onButtonInteraction(ButtonInteractionEvent event) {
+        String[] parts = event.getComponentId().split("_");
+        if (parts.length < 2)
+            return;
 
-    String action = parts[0];       
-    String monsterName = parts[1];  
-    JsonObject monsterData = getMonsterData(monsterName);
-    if (monsterData == null) return;
+        String action = parts[0];
+        String monsterName = parts[1];
+        JsonObject monsterData = getMonsterData(monsterName);
+        if (monsterData == null)
+            return;
 
-    EmbedBuilder embed = new EmbedBuilder();
-    embed.setColor(new Color(184, 56, 56));
-    if (monsterData.has("thumbnail")) embed.setThumbnail(monsterData.get("thumbnail").getAsString());
+        EmbedBuilder embed = new EmbedBuilder();
+        embed.setColor(new Color(184, 56, 56));
+        if (monsterData.has("thumbnail"))
+            embed.setThumbnail(monsterData.get("thumbnail").getAsString());
 
-    String icon = monsterData.has("icon") ? monsterData.get("icon").getAsString() + " " : "";
-    String titleText = "# " + icon + monsterName + "\n";
+        String icon = monsterData.has("icon") ? monsterData.get("icon").getAsString() + " " : "";
+        String titleText = "# " + icon + monsterName + "\n";
 
-    switch (action) {
+        switch (action) {
         case "basic":
             sendBasicPage(null, event, monsterName, monsterData, true);
             return;
         case "hitzone":
             embed.setDescription(titleText + "\n" + getArrayAsString(monsterData, "hitzone"));
             break;
-            
-        // 💡 소재 정보 관련 케이스 통합 처리
-        case "drop":
-        case "dropLow":
-        case "dropHigh":
-            String dataKey = action.equals("dropHigh") ? "drop_high" : "drop_low";
-            
-            // 만약 하위/상위 구분이 없는 구형 JSON이라면 기존 "drop" 키를 사용
-            if (!monsterData.has(dataKey)) dataKey = "drop";
-            
-            embed.setDescription(titleText + "\n" + getArrayAsString(monsterData, dataKey));
-                
-                event.editMessageEmbeds(embed.build())
-                     .setComponents(
-                         ActionRow.of(getTabButtons("drop", monsterName)),
-                         ActionRow.of(
-                             // 💡 .withEmoji를 사용하여 이모지를 따로 넣어줍니다.
-                             Button.success("dropLow_" + monsterName, "하위 소재 정보")
-                                   .withEmoji(Emoji.fromFormatted("<:Rank_3:1492424259262222356>")), 
-                             
-                             Button.success("dropHigh_" + monsterName, "상위 소재 정보")
-                                   .withEmoji(Emoji.fromFormatted("<:Rank_4:1492424261032214589>"))
-                     )
-                 ).queue();
-            return;
 
-        case "status":
-            embed.setDescription(titleText);
-            if (monsterData.has("special_attack")) embed.addField("**《몬스터의 특수 공격》**", getArrayAsString(monsterData, "special_attack"), false);
-            embed.addField("**《유효 상태 이상》**", getArrayAsString(monsterData, "status"), true);
-            embed.addField("**《유효 아이템》**", getArrayAsString(monsterData, "item"), true);
-            break;
-    }
-    
-    // 일반 탭 클릭 시 (기본 정보, 육질 등)
-    event.editMessageEmbeds(embed.build())
-         .setActionRow(getTabButtons(action, monsterName))
-         .queue();
-}
-    private void sendBasicPage(SlashCommandInteractionEvent slashEvent, ButtonInteractionEvent buttonEvent, String monsterName, JsonObject monsterData, boolean isEdit) {
+        // 💡 소재 정보 관련 케이스 통합 처리
+// 💡 소재 정보 탭 (하위/상위 구분 여부 체크 로직 추가)
+            case "drop":
+            case "dropLow":
+            case "dropHigh":
+                // 1. JSON 파일에 하위/상위 구분이 있는지(drop_low 키가 있는지) 확인합니다.
+                boolean hasRankInfo = monsterData.has("drop_low");
+                
+                String dataKey = "drop"; // 기본값은 통합 소재(drop)
+                if (hasRankInfo) {
+                    dataKey = action.equals("dropHigh") ? "drop_high" : "drop_low";
+                }
+                
+                embed.setDescription(titleText + "\n" + getArrayAsString(monsterData, dataKey));
+                
+                if (hasRankInfo) {
+                    // 2. 하위/상위 구분이 【있는】 몬스터 (예: 레 다우)
+                    event.editMessageEmbeds(embed.build())
+                         .setComponents(
+                             // 첫 번째 줄 (위): 하위/상위 소재 버튼
+                             ActionRow.of(
+                                 Button.success("dropLow_" + monsterName, "《 하위 》")
+                                       .withEmoji(Emoji.fromFormatted("<:Rank_3:1492424259262222356>")), 
+                                 Button.success("dropHigh_" + monsterName, "《 상위 》")
+                                       .withEmoji(Emoji.fromFormatted("<:Rank_4:1492424261032214589>"))
+                             ),
+                             // 두 번째 줄 (아래): 메인 탭 버튼
+                             ActionRow.of(getTabButtons("drop", monsterName))
+                         ).queue();
+                } else {
+                    // 3. 하위/상위 구분이 【없는】 몬스터 (예: 리오레우스)
+                    event.editMessageEmbeds(embed.build())
+                         // 메인 탭 버튼만 출력 (서브 버튼 없음)
+                         .setActionRow(getTabButtons("drop", monsterName))
+                         .queue();
+                }
+                return;
+
+// 💡 상태이상 정보 탭 (소제목 + 인용구 리스트 방식)
+// 💡 상태이상 정보 탭 (인식은 원본으로, 출력은 깔끔하게)
+            case "status":
+                List<String> star3 = new ArrayList<>();
+                List<String> star2 = new ArrayList<>();
+                List<String> star1 = new ArrayList<>();
+                List<String> star0 = new ArrayList<>();
+
+                if (monsterData.has("status")) {
+                    monsterData.getAsJsonArray("status").forEach(el -> {
+                        // 1. JSON 원본 데이터를 그대로 가져옵니다. (인식용)
+                        String originalStr = el.getAsString();
+                        
+                        // 2. 출력용 데이터: 정규식을 사용해 띄어쓰기 특수문자(　)와 " (⭐⭐)" 같은 괄호 덩어리를 싹 지웁니다.
+                        String cleanStr = "> " + originalStr.replaceAll("[　\\s]*\\(.*?\\)", "").trim();
+
+                        // 3. 분류할 때는 원본(originalStr)에 있는 별 개수로 똑똑하게 판단해서 넣습니다!
+                        if (originalStr.contains("⭐⭐⭐")) star3.add(cleanStr);
+                        else if (originalStr.contains("⭐⭐")) star2.add(cleanStr);
+                        else if (originalStr.contains("⭐")) star1.add(cleanStr);
+                        else star0.add(cleanStr);
+                    });
+                }
+
+                StringBuilder statusDesc = new StringBuilder(titleText + "\n");
+                
+                // 4. 소제목은 사진처럼 아주 심플하게 변경했습니다.
+                if (!star3.isEmpty()) statusDesc.append("**《 ⭐⭐⭐ 》**\n").append(String.join("\n", star3)).append("\n\n");
+                if (!star2.isEmpty()) statusDesc.append("**《 ⭐⭐ 》**\n").append(String.join("\n", star2)).append("\n\n");
+                if (!star1.isEmpty()) statusDesc.append("**《 ⭐ 》**\n").append(String.join("\n", star1)).append("\n\n");
+                if (!star0.isEmpty()) statusDesc.append("**《 ❌ 》**\n").append(String.join("\n", star0)).append("\n\n");
+
+// --- 특수 공격 처리 (기존과 동일) ---
+// --- 특수 공격 처리 (기존과 동일) ---
+                if (monsterData.has("special_attack")) {
+                    statusDesc.append("**《 몬스터의 특수 공격 》**\n");
+                    monsterData.getAsJsonArray("special_attack").forEach(el -> {
+                        statusDesc.append("> ").append(el.getAsString()).append("\n");
+                    });
+                    statusDesc.append("\n");
+                }
+                
+                // 💡 유효 아이템 처리 (상태이상과 동일하게 소제목 + 인용구 세로 리스트 적용)
+                if (monsterData.has("item")) {
+                    List<String> validItems = new ArrayList<>();   // ⭕ 리스트
+                    List<String> invalidItems = new ArrayList<>(); // ❌ 리스트
+
+                    monsterData.getAsJsonArray("item").forEach(el -> {
+                        String originalStr = el.getAsString();
+                        
+                        // 뒤에 붙은 " (⭕)", " (❌)"를 지우고 앞에 인용구(> )를 붙입니다.
+                        String cleanStr = "> " + originalStr.replaceAll("[　\\s]*\\(.*?\\)", "").trim();
+
+                        // 기호에 따라 자동 분류
+                        if (originalStr.contains("⭕")) validItems.add(cleanStr);
+                        else if (originalStr.contains("❌")) invalidItems.add(cleanStr);
+                        else validItems.add(cleanStr); // 혹시 모를 기호 누락 시 기본값
+                    });
+
+                    // ⭕ 유효 아이템 리스트 출력
+                    if (!validItems.isEmpty()) {
+                        statusDesc.append("**《 ⭕ 유효 아이템 》**\n")
+                                  .append(String.join("\n", validItems))
+                                  .append("\n\n");
+                    }
+                    
+                    // ❌ 사용 불가 아이템 리스트 출력
+                    if (!invalidItems.isEmpty()) {
+                        statusDesc.append("**《 ❌ 무효 아이템 》**\n")
+                                  .append(String.join("\n", invalidItems))
+                                  .append("\n\n");
+                    }
+                }
+
+                // 완성된 텍스트를 임베드에 삽입
+                embed.setDescription(statusDesc.toString().trim());
+
+                // 하위/상위 버튼처럼 추가 버튼 없이 메인 탭 한 줄만 깔끔하게 띄움
+                event.editMessageEmbeds(embed.build())
+                     .setActionRow(getTabButtons("status", monsterName))
+                     .queue();
+                return;
+            } // <--- switch 문 종료
+
+        // 일반 탭 클릭 시 (육질 등 break; 로 빠져나오는 케이스 처리용)
+        event.editMessageEmbeds(embed.build())
+             .setActionRow(getTabButtons(action, monsterName))
+             .queue();
+             
+    } // <--- onButtonInteraction 메서드 종료 // <--- onButtonInteraction 메서드 종료
+
+        // 일반 탭 클릭 시 (기본 정보, 육질 등)
+    private void sendBasicPage(SlashCommandInteractionEvent slashEvent, ButtonInteractionEvent buttonEvent,
+            String monsterName, JsonObject monsterData, boolean isEdit) {
         EmbedBuilder embed = new EmbedBuilder();
         embed.setColor(new Color(184, 56, 56));
-        if (monsterData.has("thumbnail")) embed.setThumbnail(monsterData.get("thumbnail").getAsString());
+        if (monsterData.has("thumbnail"))
+            embed.setThumbnail(monsterData.get("thumbnail").getAsString());
 
         String icon = monsterData.has("icon") ? monsterData.get("icon").getAsString() + " " : "";
         String species = monsterData.get("species").getAsString();
@@ -205,13 +319,8 @@ public void onButtonInteraction(ButtonInteractionEvent event) {
         String info = getArrayAsString(monsterData, "info");
         String habitat = monsterData.has("habitat") ? monsterData.get("habitat").getAsString() : "정보 없음";
 
-        embed.setDescription(
-            "# " + icon + monsterName + "\n" +
-            "**【 " + species + " 】**\n\n" +
-            info + "\n\n" +
-            "**《위험도》**\n" + threatLevel + "\n\n" +
-            "**《서식지》**\n" + habitat
-        );
+        embed.setDescription("# " + icon + monsterName + "\n" + "**【 " + species + " 】**\n\n" + info + "\n\n"
+                + "**《위험도》**\n" + threatLevel + "\n\n" + "**《서식지》**\n" + habitat);
 
         if (isEdit) {
             buttonEvent.editMessageEmbeds(embed.build()).setActionRow(getTabButtons("basic", monsterName)).queue();
