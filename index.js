@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const token = process.env.DISCORD_TOKEN;
+// ✅ Intents 설정 확인 (v14 기준)
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 // 몬스터 목록 및 별명 데이터
@@ -29,7 +30,7 @@ const monsterAliases = {
     "고양이 훈련 통 펀처": ["펀처", "고양이 훈련 통", "훈련 통 펀처", "연습장", "연습", "훈련", "수련장", "수련"]
 };
 
-// 쿨타임 설정
+// 쿨타임 저장소
 const cooldowns = new Collection();
 const COOLDOWN_TIME = 10000;
 
@@ -49,18 +50,23 @@ function isCooldownActive(interaction) {
     return false;
 }
 
-// 텍스트 정규화 및 이름 매칭
-function normalize(str) { return str.replace(/ /g, "").toLowerCase(); }
+function normalize(str) { 
+    return (str || "").replace(/ /g, "").toLowerCase(); 
+}
+
 function resolveMonsterName(input) {
     const normalizedInput = normalize(input);
-    for (const official of monsterList) if (normalize(official) === normalizedInput) return official;
+    for (const official of monsterList) {
+        if (normalize(official) === normalizedInput) return official;
+    }
     for (const [key, aliases] of Object.entries(monsterAliases)) {
-        for (const alias of aliases) if (normalize(alias) === normalizedInput) return key;
+        for (const alias of aliases) {
+            if (normalize(alias) === normalizedInput) return key;
+        }
     }
     return input;
 }
 
-// 데이터 읽기
 function getMonsterData(monsterName) {
     try {
         const filePath = path.join(__dirname, 'monsters', `${monsterName}.json`);
@@ -80,7 +86,6 @@ function createBaseEmbed(monsterName, monsterData) {
     return embed;
 }
 
-// 텍스트 분할 (4096자 제한 대응)
 function splitToEmbeds(monsterName, monsterData, fullDescription) {
     const embeds = [];
     const maxLength = 3800;
@@ -114,30 +119,50 @@ client.once(Events.ClientReady, async c => {
     console.log(`✅ 봇 로그인 완료: ${c.user.tag}`);
     const rest = new REST({ version: '10' }).setToken(token);
     try {
+        // 명령어 등록 시 autocomplete: true 확인
         await rest.put(Routes.applicationCommands(c.user.id), {
             body: [{
                 name: '몬스터',
                 description: '해당 몬스터의 정보를 확인합니다.',
-                options: [{ type: 3, name: '이름', description: '검색할 몬스터의 이름을 입력하세요.', required: true, autocomplete: true }]
+                options: [{
+                    type: 3, 
+                    name: '이름',
+                    description: '검색할 몬스터의 이름을 입력하세요.',
+                    required: true,
+                    autocomplete: true
+                }]
             }]
         });
-    } catch (e) { console.error(e); }
+        console.log('✅ 전역 명령어 등록 완료! (반영까지 최대 1시간 소요될 수 있습니다.)');
+    } catch (error) { console.error(error); }
 });
 
 client.on(Events.InteractionCreate, async interaction => {
+    // 💡 1. 자동완성 처리 보강
     if (interaction.isAutocomplete()) {
-        const currentInput = normalize(interaction.options.getFocused());
-        const options = monsterList.filter(name => normalize(name).includes(currentInput) || (monsterAliases[name] && monsterAliases[name].some(a => normalize(a).includes(currentInput))))
-            .slice(0, 25).map(name => ({ name, value: name }));
+        const focusedValue = interaction.options.getFocused();
+        const currentInput = normalize(focusedValue);
+        
+        const options = monsterList
+            .filter(name => {
+                const matchOfficial = normalize(name).includes(currentInput);
+                const matchAlias = monsterAliases[name] && monsterAliases[name].some(a => normalize(a).includes(currentInput));
+                return matchOfficial || matchAlias;
+            })
+            .slice(0, 25)
+            .map(name => ({ name, value: name }));
+
         await interaction.respond(options);
+        return;
     }
 
     if (interaction.isChatInputCommand()) {
         if (interaction.commandName === '몬스터') {
             if (isCooldownActive(interaction)) return;
-            const monsterName = resolveMonsterName(interaction.options.getString('이름').trim());
+            const userInput = interaction.options.getString('이름').trim();
+            const monsterName = resolveMonsterName(userInput);
             const monsterData = getMonsterData(monsterName);
-            if (!monsterData) return interaction.reply({ content: `<:X_:1493987174750748812> 데이터 없음: \`${monsterName}\``, ephemeral: true });
+            if (!monsterData) return interaction.reply({ content: `<:X_:1493987174750748812> 데이터 없음: \`${userInput}\``, ephemeral: true });
             await sendPage(interaction, !monsterData.info && monsterData.hitzone ? "hitzone" : "basic", monsterName, monsterData);
         }
     }
@@ -158,17 +183,18 @@ async function sendPage(interaction, type, monsterName, monsterData) {
     if (type === "basic") {
         if (monsterData.species) description += `**【 ${monsterData.species} 】**\n\n`;
         description += `${getArrayAsString(monsterData, "info")}\n\n`;
-        ['habitat', 'threat_level'].forEach(k => { if (monsterData[k]) description += `**《 ${k === 'habitat' ? '서식지' : '위험도'} 》**\n> ${monsterData[k]}\n\n`; });
-        [['breakable_parts', '파괴 가능 부위'], ['weak_point', '약점'], ['element_weakness', '추천 속성']].forEach(([k, t]) => {
-            if (monsterData[k]) description += `**《 ${t} 》**\n${monsterData[k].map(el => `> ${el.trim()}`).join("\n")}\n\n`;
+        if (monsterData.habitat) description += `**《 서식지 》**\n> ${monsterData.habitat}\n\n`;
+        if (monsterData.threat_level) description += `**《 위험도 》**\n> ${monsterData.threat_level}\n\n`;
+        [['breakable_parts', '파괴 가능 부위'], ['weak_point', '약점'], ['element_weakness', '추천 속성']].forEach(([key, title]) => {
+            if (monsterData[key]) {
+                description += `**《 ${title} 》**\n${monsterData[key].map(el => `> ${el.trim()}`).join("\n")}\n\n`;
+            }
         });
-    } else if (type === "hitzone") {
-        description += getArrayAsString(monsterData, "hitzone");
-    } else if (type === "drop") {
+    } else if (type === "hitzone") description += getArrayAsString(monsterData, "hitzone");
+    else if (type === "drop") {
         if (monsterData.drop_low) return sendDropPage(interaction, 'drop_low', monsterName, monsterData);
         description += getArrayAsString(monsterData, "drop");
     } else if (type === "status") {
-        // 🌟 [복구] 상태이상 자동 분류 로직
         if (monsterData.status) {
             const groups = { s3: [], s2: [], s1: [], s0: [] };
             monsterData.status.forEach(el => {
@@ -177,15 +203,24 @@ async function sendPage(interaction, type, monsterName, monsterData) {
                 else if (el.includes("Star_2")) groups.s2.push(clean);
                 else if (el.includes("Star_1")) groups.s1.push(clean);
                 else if (el.includes("X_")) groups.s0.push(clean);
-                else groups.s2.push(clean); // 기본값
+                else groups.s2.push(clean);
             });
-            if (groups.s3.length) description += `**《 <:Star_3:1493987178642935941> 매우 유효 》**\n${groups.s3.join("\n")}\n\n`;
-            if (groups.s2.length) description += `**《 <:Star_2:1493987181176426629> 유효 》**\n${groups.s2.join("\n")}\n\n`;
-            if (groups.s1.length) description += `**《 <:Star_1:1493987182992691280> 조금 유효 》**\n${groups.s1.join("\n")}\n\n`;
-            if (groups.s0.length) description += `**《 <:X_:1493987174750748812> 효과 없음 》**\n${groups.s0.join("\n")}\n\n`;
+            if (groups.s3.length) description += `**《 매우 유효 》**\n${groups.s3.join("\n")}\n\n`;
+            if (groups.s2.length) description += `**《 유효 》**\n${groups.s2.join("\n")}\n\n`;
+            if (groups.s1.length) description += `**《 조금 유효 》**\n${groups.s1.join("\n")}\n\n`;
+            if (groups.s0.length) description += `**《 효과 없음 》**\n${groups.s0.join("\n")}\n\n`;
         }
-        if (monsterData.special_attack) description += `**《 <:Info_4:1492145251941482697> 특수 공격 》**\n${monsterData.special_attack.map(el => `> ${el}`).join("\n")}\n\n`;
-        if (monsterData.item) description += `**《 아이템 유효성 》**\n${monsterData.item.map(el => `> ${el.trim()}`).join("\n")}\n\n`;
+        if (monsterData.item) {
+            const valid = [], invalid = [];
+            monsterData.item.forEach(el => {
+                const clean = `> ${el.trim()}`;
+                if (el.includes("X_")) invalid.push(clean);
+                else valid.push(clean);
+            });
+            if (valid.length) description += `**《 유효 아이템 》**\n${valid.join("\n")}\n\n`;
+            if (invalid.length) description += `**《 무효 아이템 》**\n${invalid.join("\n")}\n\n`;
+        }
+        if (monsterData.special_attack) description += `**《 특수 공격 》**\n${monsterData.special_attack.map(el => `> ${el}`).join("\n")}\n\n`;
     }
 
     const embeds = splitToEmbeds(monsterName, monsterData, description);
