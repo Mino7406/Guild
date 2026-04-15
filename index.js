@@ -79,12 +79,21 @@ function createBaseEmbed(monsterName, monsterData) {
     return embed;
 }
 
+// 💡 텍스트 분할 처리 (두 번째 카드부터 썸네일 제거 로직 적용)
 function splitToEmbeds(monsterName, monsterData, fullDescription) {
     const embeds = [];
     const maxLength = 3800;
     let remainingText = fullDescription;
+    let isFirst = true; // 첫 번째 카드인지 확인
+
     while (remainingText.length > 0) {
         const embed = createBaseEmbed(monsterName, monsterData);
+        
+        // ✅ 두 번째 카드(페이지)부터는 썸네일(아이콘)을 비표시합니다.
+        if (!isFirst) {
+            embed.setThumbnail(null);
+        }
+
         if (remainingText.length <= maxLength) {
             embed.setDescription(remainingText);
             embeds.push(embed);
@@ -95,6 +104,7 @@ function splitToEmbeds(monsterName, monsterData, fullDescription) {
         embed.setDescription(remainingText.substring(0, splitIndex));
         embeds.push(embed);
         remainingText = remainingText.substring(splitIndex).trim();
+        isFirst = false; // 이후 루프부터는 첫 번째가 아님
     }
     return embeds;
 }
@@ -129,7 +139,6 @@ client.once(Events.ClientReady, async c => {
 });
 
 client.on(Events.InteractionCreate, async interaction => {
-    // 💡 자동완성 로직 (재시작 후 디스코드 새로고침 필요)
     if (interaction.isAutocomplete()) {
         const focusedValue = interaction.options.getFocused();
         const currentInput = normalize(focusedValue);
@@ -178,14 +187,12 @@ async function sendPage(interaction, type, monsterName, monsterData) {
         if (monsterData.drop_low) return sendDropPage(interaction, 'drop_low', monsterName, monsterData);
         description += getArrayAsString(monsterData, "drop");
     } else if (type === "status") {
-        // 🌟 [수정] 자바와 동일하게 항목명에서 이모지와 괄호 완전 제거
+        // 🌟 [수정] 자바 방식: 앞쪽 아이콘은 유지, 뒷쪽 중복 괄호/이모지는 삭제
         if (monsterData.status) {
             const groups = { s3: [], s2: [], s1: [], s0: [] };
             monsterData.status.forEach(el => {
-                // 괄호 안의 이모지 전체 삭제 로직 (Java: replaceAll("[　\\s]*\\(.*?\\)", ""))
-                const cleanName = el.replace(/[　\s]*\(?<:[^>]+>\)?/g, "").trim();
+                const cleanName = el.replace(/\s*\(<:[^>]+>\)$/, "").trim();
                 const item = `> ${cleanName}`;
-                
                 if (el.includes("Star_3")) groups.s3.push(item);
                 else if (el.includes("Star_2")) groups.s2.push(item);
                 else if (el.includes("Star_1")) groups.s1.push(item);
@@ -197,17 +204,16 @@ async function sendPage(interaction, type, monsterName, monsterData) {
             if (groups.s1.length) description += `**《 <:Star_1:1493987182992691280> 조금 유효 》**\n${groups.s1.join("\n")}\n\n`;
             if (groups.s0.length) description += `**《 <:X_:1493987174750748812> 효과 없음 》**\n${groups.s0.join("\n")}\n\n`;
         }
-        
-        // 🌟 [수정] 특수 공격 위치 상향
+
+        // 🌟 특수 공격 위치 (상태이상 바로 아래)
         if (monsterData.special_attack) {
-            description += `**《 <:Info_4:1492145251941482697> 특수 공격 》**\n${monsterData.special_attack.map(el => `> ${el}`).join("\n")}\n\n`;
+            description += `**《 <:Info_4:1492145251941482697> 몬스터의 특수 공격 》**\n${monsterData.special_attack.map(el => `> ${el}`).join("\n")}\n\n`;
         }
 
-        // 🌟 [수정] 아이템 유효성 항목에서도 이모지 제거
         if (monsterData.item) {
             const valid = [], invalid = [];
             monsterData.item.forEach(el => {
-                const cleanName = el.replace(/[　\s]*\(?<:[^>]+>\)?/g, "").trim();
+                const cleanName = el.replace(/\s*\(<:[^>]+>\)$/, "").trim();
                 const item = `> ${cleanName}`;
                 if (el.includes("X_")) invalid.push(item);
                 else valid.push(item);
