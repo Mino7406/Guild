@@ -75,13 +75,15 @@ function resolveMonsterName(input) {
 // JSON 데이터 읽기
 function getMonsterData(monsterName) {
     try {
-        // 동일 폴더 내의 몬스터이름.json 파일을 읽습니다.
-        const filePath = path.join(__dirname, `${monsterName}.json`);
+        // 기존: path.join(__dirname, `${monsterName}.json`)
+        // 변경: 'monsters' 폴더 경로를 중간에 추가
+        const filePath = path.join(__dirname, 'monsters', `${monsterName}.json`);
+        
         if (!fs.existsSync(filePath)) return null;
         const fileContent = fs.readFileSync(filePath, 'utf-8');
         return JSON.parse(fileContent);
     } catch (e) {
-        console.error(e);
+        console.error("파일 읽기 오류:", e);
         return null;
     }
 }
