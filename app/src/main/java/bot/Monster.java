@@ -11,6 +11,7 @@ import net.dv8tion.jda.api.interactions.commands.Command;
 import net.dv8tion.jda.api.interactions.commands.OptionMapping;
 import net.dv8tion.jda.api.interactions.components.ActionRow;
 import net.dv8tion.jda.api.interactions.components.buttons.Button;
+import net.dv8tion.jda.api.interactions.callbacks.IReplyCallback; // 💡 쿨타임 응답을 위한 Import 추가
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -24,6 +25,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap; // 💡 쿨타임 저장을 위한 Import 추가
 
 public class Monster extends ListenerAdapter {
 
@@ -31,6 +33,10 @@ public class Monster extends ListenerAdapter {
             "타마미츠네", "라기아크루스", "셀레기오스", "오메가 플라네테스", "고그마지오스", "고양이 훈련 통 펀처"};
 
     private final Map<String, List<String>> monsterAliases = new HashMap<>();
+
+    // 💡 쿨타임 저장을 위한 저장소 (사용자 ID, 마지막 사용 시간)
+    private final ConcurrentHashMap<String, Long> cooldowns = new ConcurrentHashMap<>();
+    private final long COOLDOWN_TIME = 10000; // 10000 밀리초 = 10초
 
     public Monster() {
         monsterAliases.put("레 다우", Arrays.asList("레다우", "레", "레황", "황뢰룡"));
@@ -45,11 +51,30 @@ public class Monster extends ListenerAdapter {
         monsterAliases.put("라기아크루스", Arrays.asList("라기", "라기아", "악어", "수중전", "해룡"));
         monsterAliases.put("셀레기오스", Arrays.asList("셀레기", "제트킥", "째트킥", "셀레", "칼날비늘", "천인룡"));
         monsterAliases.put("오메가 플라네테스", Arrays.asList("오메가", "파판", "파이널판타지", "파이널 판타지", "기계", "메카", "풍뎅이", "메카풍뎅이", "병신"));
-        monsterAliases.put("고그마지오스", Arrays.asList("고그마", "고구마", "거극룡", "거극", "파룡포", "기름"));
+        monsterAliases.put("고그마지오스", Arrays.asList("고그", "고그마", "고구마", "거극룡", "거극", "파룡포", "기름"));
         monsterAliases.put("고양이 훈련 통 펀처", Arrays.asList("펀처", "고양이 훈련 통", "훈련 통 펀처", "연습장", "연습", "훈련", "수련장", "수련"));
     }
 
-    // 💡 문자열에서 공백을 모두 제거하고 소문자로 변환 (검색 성능 향상)
+    // 💡 쿨타임 체크 메서드
+    private boolean isCooldownActive(IReplyCallback event) {
+        String userId = event.getUser().getId();
+        long currentTime = System.currentTimeMillis();
+
+        if (cooldowns.containsKey(userId)) {
+            long lastTime = cooldowns.get(userId);
+            long timePassed = currentTime - lastTime;
+
+            if (timePassed < COOLDOWN_TIME) {
+                long remainingSeconds = (COOLDOWN_TIME - timePassed) / 1000;
+                // 해당 유저에게만 보이는(나만 보기) 경고 메시지 출력
+                event.reply("<:Timer:1493995200488669217> **" + remainingSeconds + "초** 후에 다시 시도해 주세요!").setEphemeral(true).queue();
+                return true;
+            }
+        }
+        cooldowns.put(userId, currentTime);
+        return false;
+    }
+
     private String normalize(String str) {
         return str.replace(" ", "").toLowerCase();
     }
@@ -57,12 +82,10 @@ public class Monster extends ListenerAdapter {
     private String resolveMonsterName(String input) {
         String normalizedInput = normalize(input);
         
-        // 1. 공식 이름에서 공백 무시하고 찾기
         for (String official : monsterList) {
             if (normalize(official).equals(normalizedInput)) return official;
         }
         
-        // 2. 별명 목록에서 공백 무시하고 찾기
         for (Map.Entry<String, List<String>> entry : monsterAliases.entrySet()) {
             for (String alias : entry.getValue()) {
                 if (normalize(alias).equals(normalizedInput)) return entry.getKey();
@@ -90,7 +113,6 @@ public class Monster extends ListenerAdapter {
             for (String officialName : monsterList) {
                 boolean isMatch = normalize(officialName).contains(currentInput);
                 
-                // 공식 이름에 없으면 별명 목록 뒤지기
                 if (!isMatch && monsterAliases.containsKey(officialName)) {
                     for (String alias : monsterAliases.get(officialName)) {
                         if (normalize(alias).contains(currentInput)) {
@@ -111,7 +133,6 @@ public class Monster extends ListenerAdapter {
 
     private JsonObject getMonsterData(String monsterName) {
         try {
-            // resolveMonsterName을 통해 반환된 '공식 이름'이 파일명과 정확히 일치해야 함
             String fileName = monsterName + ".json";
             InputStream is = getClass().getClassLoader().getResourceAsStream(fileName);
             if (is == null) return null;
@@ -137,15 +158,18 @@ public class Monster extends ListenerAdapter {
     @Override
     public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
         if (event.getName().equals("몬스터")) {
+            // 💡 슬래시 명령어 사용 시 쿨타임 체크
+            if (isCooldownActive(event)) return;
+
             OptionMapping option = event.getOption("이름");
             if (option == null) return;
             
             String userInput = option.getAsString().trim();
-            String monsterName = resolveMonsterName(userInput); // 💡 여기서 별칭을 공식 이름으로 변환
+            String monsterName = resolveMonsterName(userInput);
             JsonObject monsterData = getMonsterData(monsterName);
             
             if (monsterData == null) {
-                event.reply("<:X_:1493987174750748812> 데이터 없음: `" + userInput + "`").queue();
+                event.reply("<:X_:1493987174750748812> 데이터 없음: `" + userInput + "`").setEphemeral(true).queue(); // 없는 데이터 검색 시에도 나만 보기로 변경
                 return;
             }
             
@@ -159,6 +183,9 @@ public class Monster extends ListenerAdapter {
 
     @Override
     public void onButtonInteraction(ButtonInteractionEvent event) {
+        // 💡 버튼 클릭 시 쿨타임 체크
+        if (isCooldownActive(event)) return;
+
         String[] parts = event.getComponentId().split("_");
         if (parts.length < 2) return;
 
@@ -220,7 +247,7 @@ public class Monster extends ListenerAdapter {
                     if (!s0.isEmpty()) statusDesc.append("**《 <:X_:1493987174750748812> 효과 없음 》**\n").append(String.join("\n", s0)).append("\n\n");
                 }
                 if (monsterData.has("special_attack")) {
-                    statusDesc.append("**《 몬스터의 특수 공격 》**\n");
+                    statusDesc.append("**《 <:Info_4:1492145251941482697> 몬스터의 특수 공격 》**\n");
                     monsterData.getAsJsonArray("special_attack").forEach(el -> statusDesc.append("> ").append(el.getAsString()).append("\n"));
                     statusDesc.append("\n");
                 }
