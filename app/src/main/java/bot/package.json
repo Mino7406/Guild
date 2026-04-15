@@ -1,0 +1,12 @@
+{
+    "name": "guild-bot",
+    "version": "1.0.0",
+    "description": "길드",
+    "main": "index.js",
+    "scripts": {
+      "start": "node index.js"
+    },
+    "dependencies": {
+      "discord.js": "^14.14.1"
+    }
+  }
