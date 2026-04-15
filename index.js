@@ -4,8 +4,9 @@ const fs = require('fs');
 const path = require('path');
 
 const token = process.env.DISCORD_TOKEN;
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({ intents: [GatewayIntentBits.GatewayIntents.Guilds] });
 
+// 몬스터 목록 및 별명 데이터
 const monsterList = [
     "레 다우", "우드 투나", "누 이그드라", "진 다하드", "리오레우스", "조 시아", "알슈베르도", "고어 마가라",
     "타마미츠네", "라기아크루스", "셀레기오스", "오메가 플라네테스", "고그마지오스", "고양이 훈련 통 펀처"
@@ -28,6 +29,7 @@ const monsterAliases = {
     "고양이 훈련 통 펀처": ["펀처", "고양이 훈련 통", "훈련 통 펀처", "연습장", "연습", "훈련", "수련장", "수련"]
 };
 
+// 쿨타임 설정
 const cooldowns = new Collection();
 const COOLDOWN_TIME = 10000;
 
@@ -47,6 +49,7 @@ function isCooldownActive(interaction) {
     return false;
 }
 
+// 텍스트 정규화 및 이름 매칭
 function normalize(str) { return str.replace(/ /g, "").toLowerCase(); }
 function resolveMonsterName(input) {
     const normalizedInput = normalize(input);
@@ -57,6 +60,7 @@ function resolveMonsterName(input) {
     return input;
 }
 
+// 데이터 읽기
 function getMonsterData(monsterName) {
     try {
         const filePath = path.join(__dirname, 'monsters', `${monsterName}.json`);
@@ -76,10 +80,10 @@ function createBaseEmbed(monsterName, monsterData) {
     return embed;
 }
 
-// 💡 텍스트 분할 함수
+// 텍스트 분할 (4096자 제한 대응)
 function splitToEmbeds(monsterName, monsterData, fullDescription) {
     const embeds = [];
-    const maxLength = 3800; // 좀 더 안정적인 길이를 위해 3800으로 조정
+    const maxLength = 3800;
     let remainingText = fullDescription;
     while (remainingText.length > 0) {
         const embed = createBaseEmbed(monsterName, monsterData);
@@ -158,19 +162,22 @@ async function sendPage(interaction, type, monsterName, monsterData) {
         [['breakable_parts', '파괴 가능 부위'], ['weak_point', '약점'], ['element_weakness', '추천 속성']].forEach(([k, t]) => {
             if (monsterData[k]) description += `**《 ${t} 》**\n${monsterData[k].map(el => `> ${el.trim()}`).join("\n")}\n\n`;
         });
-    } else if (type === "hitzone") description += getArrayAsString(monsterData, "hitzone");
-    else if (type === "drop") {
+    } else if (type === "hitzone") {
+        description += getArrayAsString(monsterData, "hitzone");
+    } else if (type === "drop") {
         if (monsterData.drop_low) return sendDropPage(interaction, 'drop_low', monsterName, monsterData);
         description += getArrayAsString(monsterData, "drop");
     } else if (type === "status") {
+        // 🌟 [복구] 상태이상 자동 분류 로직
         if (monsterData.status) {
             const groups = { s3: [], s2: [], s1: [], s0: [] };
             monsterData.status.forEach(el => {
-                const clean = `> ${el.replace(/[　\s]*\(.*?\)/g, "").trim()}`;
+                const clean = `> ${el.trim()}`;
                 if (el.includes("Star_3")) groups.s3.push(clean);
                 else if (el.includes("Star_2")) groups.s2.push(clean);
                 else if (el.includes("Star_1")) groups.s1.push(clean);
-                else groups.s0.push(clean);
+                else if (el.includes("X_")) groups.s0.push(clean);
+                else groups.s2.push(clean); // 기본값
             });
             if (groups.s3.length) description += `**《 <:Star_3:1493987178642935941> 매우 유효 》**\n${groups.s3.join("\n")}\n\n`;
             if (groups.s2.length) description += `**《 <:Star_2:1493987181176426629> 유효 》**\n${groups.s2.join("\n")}\n\n`;
@@ -187,19 +194,14 @@ async function sendPage(interaction, type, monsterName, monsterData) {
     else await interaction.reply({ embeds, components });
 }
 
-// 💡 소재 정보(Drop)에서도 분할 로직을 적용하도록 수정됨
 async function sendDropPage(interaction, rankKey, monsterName, monsterData) {
     const icon = monsterData.icon ? `${monsterData.icon} ` : "";
     const description = `# ${icon}${monsterName}\n\n${getArrayAsString(monsterData, rankKey)}`;
-    
-    // ✅ 텍스트 분할 적용
     const embeds = splitToEmbeds(monsterName, monsterData, description);
-
     const rankRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`dropLow_${monsterName}`).setLabel("《 하위 》").setEmoji("1492424259262222356").setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(`dropHigh_${monsterName}`).setLabel("《 상위 》").setEmoji("1492424261032214589").setStyle(ButtonStyle.Success)
     );
-    
     const components = [rankRow, ...getTabButtons("drop", monsterName, monsterData)];
     await interaction.update({ embeds, components });
 }
