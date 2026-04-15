@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const token = process.env.DISCORD_TOKEN;
-const client = new Client({ intents: [GatewayIntentBits.GatewayIntents.Guilds] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 // 몬스터 목록 및 별명 데이터
 const monsterList = [
