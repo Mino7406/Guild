@@ -184,21 +184,21 @@ async function sendPage(interaction, type, monsterName, monsterData) {
             const groups = { s3: [], s2: [], s1: [], s0: [] };
             monsterData.status.forEach(el => {
                 const clean = `> ${el.trim()}`;
-                if (el.includes("Star_3")) groups.s3.push(clean);
-                else if (el.includes("Star_2")) groups.s2.push(clean);
-                else if (el.includes("Star_1")) groups.s1.push(clean);
-                else if (el.includes("X_")) groups.s0.push(clean);
+                if (el.includes("<:Star_3:1493987178642935941>")) groups.s3.push(clean);
+                else if (el.includes("<:Star_2:1493987181176426629>")) groups.s2.push(clean);
+                else if (el.includes("<:Star_1:1493987182992691280>")) groups.s1.push(clean);
+                else if (el.includes("<:X_:1493987174750748812>")) groups.s0.push(clean);
                 else groups.s2.push(clean);
             });
-            if (groups.s3.length) description += `**《 매우 유효 》**\n${groups.s3.join("\n")}\n\n`;
-            if (groups.s2.length) description += `**《 유효 》**\n${groups.s2.join("\n")}\n\n`;
-            if (groups.s1.length) description += `**《 조금 유효 》**\n${groups.s1.join("\n")}\n\n`;
-            if (groups.s0.length) description += `**《 효과 없음 》**\n${groups.s0.join("\n")}\n\n`;
+            if (groups.s3.length) description += `**《 <:Star_3:1493987178642935941> 매우 유효 》**\n${groups.s3.join("\n")}\n\n`;
+            if (groups.s2.length) description += `**《 <:Star_2:1493987181176426629> 유효 》**\n${groups.s2.join("\n")}\n\n`;
+            if (groups.s1.length) description += `**《 <:Star_1:1493987182992691280> 조금 유효 》**\n${groups.s1.join("\n")}\n\n`;
+            if (groups.s0.length) description += `**《 <:X_:1493987174750748812> 효과 없음 》**\n${groups.s0.join("\n")}\n\n`;
         }
         
         // 2. 특수 공격 (위치 상향 조정)
         if (monsterData.special_attack) {
-            description += `**《 특수 공격 》**\n${monsterData.special_attack.map(el => `> ${el}`).join("\n")}\n\n`;
+            description += `**《 <:Info_4:1492145251941482697> 특수 공격 》**\n${monsterData.special_attack.map(el => `> ${el}`).join("\n")}\n\n`;
         }
 
         // 3. 아이템 유효성 (아이콘 제거됨)
@@ -206,7 +206,7 @@ async function sendPage(interaction, type, monsterName, monsterData) {
             const valid = [], invalid = [];
             monsterData.item.forEach(el => {
                 const clean = `> ${el.trim()}`;
-                if (el.includes("X_")) invalid.push(clean);
+                if (el.includes("<:X_:1493987174750748812>")) invalid.push(clean);
                 else valid.push(clean);
             });
             if (valid.length) description += `**《 <:Check:1493987173194661919> 유효 아이템 》**\n${valid.join("\n")}\n\n`;
