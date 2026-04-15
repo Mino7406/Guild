@@ -125,11 +125,11 @@ client.once(Events.ClientReady, async c => {
         await rest.put(Routes.applicationCommands(c.user.id), {
             body: [{
                 name: '몬스터',
-                description: '해당 몬스터의 정보를 확인합니다.',
+                description: '해당 몬스터의 정보를 확인합니다. 【현재 9성 몬스터까지만 지원】',
                 options: [{
                     type: 3, 
                     name: '이름', 
-                    description: '검색할 몬스터의 이름을 입력하세요.', 
+                    description: '검색할 몬스터의 이름을 입력하세요. 【별명이나 줄임말로도 검색 가능합니다.】', 
                     required: true, 
                     autocomplete: true 
                 }]
