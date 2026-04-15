@@ -125,12 +125,11 @@ client.once(Events.ClientReady, async c => {
                 }]
             }]
         });
-        console.log('✅ 전역 명령어 등록 완료!');
     } catch (e) { console.error(e); }
 });
 
 client.on(Events.InteractionCreate, async interaction => {
-    // 💡 1. 자동완성 처리 (보강됨)
+    // 💡 자동완성 로직 (재시작 후 디스코드 새로고침 필요)
     if (interaction.isAutocomplete()) {
         const focusedValue = interaction.options.getFocused();
         const currentInput = normalize(focusedValue);
@@ -179,16 +178,19 @@ async function sendPage(interaction, type, monsterName, monsterData) {
         if (monsterData.drop_low) return sendDropPage(interaction, 'drop_low', monsterName, monsterData);
         description += getArrayAsString(monsterData, "drop");
     } else if (type === "status") {
-        // 1. 상태이상 분류 (이모지 제거됨)
+        // 🌟 [수정] 자바와 동일하게 항목명에서 이모지와 괄호 완전 제거
         if (monsterData.status) {
             const groups = { s3: [], s2: [], s1: [], s0: [] };
             monsterData.status.forEach(el => {
-                const clean = `> ${el.trim()}`;
-                if (el.includes("<:Star_3:1493987178642935941>")) groups.s3.push(clean);
-                else if (el.includes("<:Star_2:1493987181176426629>")) groups.s2.push(clean);
-                else if (el.includes("<:Star_1:1493987182992691280>")) groups.s1.push(clean);
-                else if (el.includes("<:X_:1493987174750748812>")) groups.s0.push(clean);
-                else groups.s2.push(clean);
+                // 괄호 안의 이모지 전체 삭제 로직 (Java: replaceAll("[　\\s]*\\(.*?\\)", ""))
+                const cleanName = el.replace(/[　\s]*\(?<:[^>]+>\)?/g, "").trim();
+                const item = `> ${cleanName}`;
+                
+                if (el.includes("Star_3")) groups.s3.push(item);
+                else if (el.includes("Star_2")) groups.s2.push(item);
+                else if (el.includes("Star_1")) groups.s1.push(item);
+                else if (el.includes("X_")) groups.s0.push(item);
+                else groups.s2.push(item);
             });
             if (groups.s3.length) description += `**《 <:Star_3:1493987178642935941> 매우 유효 》**\n${groups.s3.join("\n")}\n\n`;
             if (groups.s2.length) description += `**《 <:Star_2:1493987181176426629> 유효 》**\n${groups.s2.join("\n")}\n\n`;
@@ -196,18 +198,19 @@ async function sendPage(interaction, type, monsterName, monsterData) {
             if (groups.s0.length) description += `**《 <:X_:1493987174750748812> 효과 없음 》**\n${groups.s0.join("\n")}\n\n`;
         }
         
-        // 2. 특수 공격 (위치 상향 조정)
+        // 🌟 [수정] 특수 공격 위치 상향
         if (monsterData.special_attack) {
             description += `**《 <:Info_4:1492145251941482697> 특수 공격 》**\n${monsterData.special_attack.map(el => `> ${el}`).join("\n")}\n\n`;
         }
 
-        // 3. 아이템 유효성 (아이콘 제거됨)
+        // 🌟 [수정] 아이템 유효성 항목에서도 이모지 제거
         if (monsterData.item) {
             const valid = [], invalid = [];
             monsterData.item.forEach(el => {
-                const clean = `> ${el.trim()}`;
-                if (el.includes("<:X_:1493987174750748812>")) invalid.push(clean);
-                else valid.push(clean);
+                const cleanName = el.replace(/[　\s]*\(?<:[^>]+>\)?/g, "").trim();
+                const item = `> ${cleanName}`;
+                if (el.includes("X_")) invalid.push(item);
+                else valid.push(item);
             });
             if (valid.length) description += `**《 <:Check:1493987173194661919> 유효 아이템 》**\n${valid.join("\n")}\n\n`;
             if (invalid.length) description += `**《 <:X_:1493987174750748812> 무효 아이템 》**\n${invalid.join("\n")}\n\n`;
