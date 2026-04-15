@@ -9,12 +9,8 @@ import net.dv8tion.jda.api.interactions.commands.build.Commands;
 public class App {
     public static void main(String[] args) {
         // 디스코드 토큰
-        String token = System.getenv("DISCORD_TOKEN");
+        String token = "DISCORD_TOKEN";
 
-        if (token == null || token.isEmpty()) {
-            System.out.println("오류: DISCORD_TOKEN 환경 변수가 설정되지 않았습니다!");
-            return; // 토큰이 없으면 봇 실행 중단
-        }
 
         // 기존 디스코드 서버 ID (테스트 서버에 남아있는 중복 명령어를 지우기 위해 임시 유지)
         String guildId = "1282704020619661393";
