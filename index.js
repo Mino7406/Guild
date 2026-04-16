@@ -189,13 +189,13 @@ client.on(Events.InteractionCreate, async interaction => {
             if (!inputStr) {
                 const selectMenu = new StringSelectMenuBuilder()
                     .setCustomId('monsterSelect')
-                    .setPlaceholder('<:Info_3:1492145250192331015> 확인하고 싶은 몬스터를 선택하세요')
-                    .addOptions(monsterList.map(name => ({ label: name, value: name, emoji: '🐾' })));
+                    .setPlaceholder('🔎 확인하고 싶은 몬스터를 선택하세요')
+                    .addOptions(monsterList.map(name => ({ label: name, value: name })));
 
                 const row = new ActionRowBuilder().addComponents(selectMenu);
                 return interaction.reply({ 
-                    content: '<:info_5:1494241618872500428> **찾으시는 몬스터를 아래 목록에서 선택해 주세요!**', 
-                    components: [row],
+                    content: '📖 **찾으시는 몬스터를 아래 목록에서 선택해 주세요!**', 
+                    components: [row], 
                     ephemeral: true
                 });
             }
