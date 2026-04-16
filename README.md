@@ -15,4 +15,4 @@
 
 
 ## 설치 (Setup)
-https://github.com/Mino7406/Guild/releases/tag/v1.0
+- https://github.com/Mino7406/Guild/releases/tag/v1.0
