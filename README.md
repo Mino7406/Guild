@@ -12,3 +12,7 @@
 ## 기술 스택 (Tech Stack)
 - **Language**: JavaScript
 - **Data Format**: JSON (GSON 라이브러리를 통한 데이터 파싱)
+
+
+## 설치 (Setup)
+https://github.com/Mino7406/Guild/releases/tag/v1.0
