@@ -146,7 +146,7 @@ client.once(Events.ClientReady, async c => {
                 options: [{
                     type: 3, 
                     name: '이름', 
-                    description: '검색할 몬스터의 이름을 입력하세요.', 
+                    description: '검색할 몬스터의 이름을 입력하세요. (별명이나 줄임말로도 검색 가능)', 
                     required: false,
                     autocomplete: true 
                 }]
