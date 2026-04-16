@@ -183,7 +183,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 const selectMenu = new StringSelectMenuBuilder()
                     .setCustomId('monsterSelect')
                     .setPlaceholder('🔍 확인하고 싶은 몬스터를 선택하세요')
-                    .addOptions(monsterList.map(name => ({ label: name, value: name, emoji: '🐾' })));
+                    .addOptions(monsterList.map(name => ({ label: name, value: name })));
 
                 const row = new ActionRowBuilder().addComponents(selectMenu);
                 return interaction.reply({ 
