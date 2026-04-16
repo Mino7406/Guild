@@ -73,40 +73,49 @@ function getArrayAsString(data, key) {
 
 function createBaseEmbed(monsterName, monsterData) {
     const embed = new EmbedBuilder().setColor(monsterData.color || 0xFFFFFF);
+    // 💡 썸네일 무조건 표시되도록 보장
     if (monsterData.thumbnail) embed.setThumbnail(monsterData.thumbnail);
     return embed;
 }
 
-function splitToEmbeds(monsterName, monsterData, fullDescription) {
+// 💡 매 페이지마다 헤더(이름)와 썸네일을 유지하도록 로직 변경
+function splitToEmbeds(monsterName, monsterData, contentText) {
     const embeds = [];
     const maxLength = 2200; 
-    let remainingText = fullDescription;
-    let isFirst = true;
+    
+    // 헤더(제목 부분)를 밖으로 빼서 고정시킵니다.
+    const icon = monsterData.icon ? `${monsterData.icon} ` : "";
+    const header = `# ${icon}${monsterName}\n\n`;
+
+    let remainingText = contentText;
 
     while (remainingText.length > 0) {
         const embed = createBaseEmbed(monsterName, monsterData);
-        if (!isFirst) embed.setThumbnail(null);
+        // 기존의 2페이지부터 썸네일 날리던 코드 삭제 완료!
 
-        if (remainingText.length <= maxLength) {
-            embed.setDescription(remainingText);
+        // 헤더 글자 수만큼 여유 공간 계산
+        const availableLength = maxLength - header.length;
+
+        if (remainingText.length <= availableLength) {
+            embed.setDescription(header + remainingText);
             embeds.push(embed);
             break;
         }
 
-        let splitIndex = remainingText.lastIndexOf('\n\n', maxLength);
+        let splitIndex = remainingText.lastIndexOf('\n\n', availableLength);
         
-        if (splitIndex === -1 || splitIndex < maxLength * 0.6) {
-            splitIndex = remainingText.lastIndexOf('\n', maxLength);
+        if (splitIndex === -1 || splitIndex < availableLength * 0.6) {
+            splitIndex = remainingText.lastIndexOf('\n', availableLength);
         }
 
         if (splitIndex === -1) {
-            splitIndex = maxLength;
+            splitIndex = availableLength;
         }
 
-        embed.setDescription(remainingText.substring(0, splitIndex).trim());
+        // 항상 헤더를 맨 위에 붙이고 그 뒤에 자른 내용을 덧붙임
+        embed.setDescription(header + remainingText.substring(0, splitIndex).trim());
         embeds.push(embed);
         remainingText = remainingText.substring(splitIndex).trim();
-        isFirst = false;
 
         if (embeds.length >= 15) break; 
     }
@@ -137,6 +146,12 @@ function getTabButtons(currentTab, monsterName, monsterData, currentPage = 0, to
 
 client.once(Events.ClientReady, async c => {
     console.log(`✅ 봇 로그인 완료: ${c.user.tag}`);
+    
+    c.user.setActivity('/몬스터', { 
+        type: ActivityType.Streaming,
+        url: 'https://twitch.tv/discord' 
+    });
+
     const rest = new REST({ version: '10' }).setToken(token);
     try {
         await rest.put(Routes.applicationCommands(c.user.id), {
@@ -174,13 +189,12 @@ client.on(Events.InteractionCreate, async interaction => {
             if (!inputStr) {
                 const selectMenu = new StringSelectMenuBuilder()
                     .setCustomId('monsterSelect')
-                    .setPlaceholder('🔍 확인하고 싶은 몬스터를 선택하세요')
+                    .setPlaceholder('<:Info_3:1492145250192331015> 확인하고 싶은 몬스터를 선택하세요')
                     .addOptions(monsterList.map(name => ({ label: name, value: name, emoji: '🐾' })));
 
                 const row = new ActionRowBuilder().addComponents(selectMenu);
-                // 💡 드롭다운 선택 메뉴 출력 시에도 '나만 보기(ephemeral: true)' 적용
                 return interaction.reply({ 
-                    content: '📝 **찾으시는 몬스터를 아래 목록에서 선택해 주세요!**', 
+                    content: '<:info_5:1494241618872500428> **찾으시는 몬스터를 아래 목록에서 선택해 주세요!**', 
                     components: [row],
                     ephemeral: true
                 });
@@ -225,8 +239,8 @@ client.on(Events.InteractionCreate, async interaction => {
 });
 
 async function sendPage(interaction, type, monsterName, monsterData, page = 0) {
-    const icon = monsterData.icon ? `${monsterData.icon} ` : "";
-    let description = `# ${icon}${monsterName}\n`;
+    // 💡 헤더 처리는 splitToEmbeds에서 하므로 여기서는 내용물만 만듭니다.
+    let description = "";
 
     if (type === "basic") {
         if (monsterData.species) description += `**【 ${monsterData.species} 】**\n\n`;
@@ -260,7 +274,7 @@ async function sendPage(interaction, type, monsterName, monsterData, page = 0) {
         }
 
         if (monsterData.special_attack) {
-            description += `**《 <:Info_4:1492145251941482697> 몬스터의 특수 공격 》**\n${monsterData.special_attack.map(el => `> ${el}`).join("\n")}\n\n`;
+            description += `**《 특수 공격 》**\n${monsterData.special_attack.map(el => `> ${el}`).join("\n")}\n\n`;
         }
 
         if (monsterData.item) {
@@ -285,14 +299,13 @@ async function sendPage(interaction, type, monsterName, monsterData, page = 0) {
     const currentEmbed = embeds[page];
     const components = getTabButtons(type, monsterName, monsterData, page, totalPages);
     
-    // 💡 임베드 전송 시 '나만 보기(ephemeral: true)' 적용
     if (interaction.isMessageComponent()) await interaction.update({ content: "", embeds: [currentEmbed], components });
     else await interaction.reply({ embeds: [currentEmbed], components, ephemeral: true });
 }
 
 async function sendDropPage(interaction, rankKey, monsterName, monsterData, page = 0) {
-    const icon = monsterData.icon ? `${monsterData.icon} ` : "";
-    const description = `# ${icon}${monsterName}\n\n${getArrayAsString(monsterData, rankKey)}`;
+    // 💡 헤더 처리는 splitToEmbeds에서 자동 처리되므로 본문만 넘깁니다.
+    const description = getArrayAsString(monsterData, rankKey);
     const embeds = splitToEmbeds(monsterName, monsterData, description);
     
     const totalPages = embeds.length;
@@ -327,7 +340,6 @@ async function sendDropPage(interaction, rankKey, monsterName, monsterData, page
     
     if (tabRow.components.length > 0) components.push(tabRow);
 
-    // 💡 소재 임베드 전송 시에도 '나만 보기(ephemeral: true)' 적용
     if (interaction.isMessageComponent()) await interaction.update({ content: "", embeds: [currentEmbed], components });
     else await interaction.reply({ embeds: [currentEmbed], components, ephemeral: true });
 }
