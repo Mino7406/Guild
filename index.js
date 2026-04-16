@@ -1,5 +1,4 @@
 require('dotenv').config();
-// ✅ StringSelectMenuBuilder 가 추가되었습니다.
 const { Client, GatewayIntentBits, Events, REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, Collection, StringSelectMenuBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
@@ -80,7 +79,7 @@ function createBaseEmbed(monsterName, monsterData) {
 
 function splitToEmbeds(monsterName, monsterData, fullDescription) {
     const embeds = [];
-    const maxLength = 2800;
+    const maxLength = 2200; 
     let remainingText = fullDescription;
     let isFirst = true;
 
@@ -94,26 +93,46 @@ function splitToEmbeds(monsterName, monsterData, fullDescription) {
             break;
         }
 
-        let splitIndex = remainingText.lastIndexOf('\n', maxLength);
-        if (splitIndex === -1) splitIndex = maxLength;
+        let splitIndex = remainingText.lastIndexOf('\n\n', maxLength);
+        
+        if (splitIndex === -1 || splitIndex < maxLength * 0.6) {
+            splitIndex = remainingText.lastIndexOf('\n', maxLength);
+        }
 
-        embed.setDescription(remainingText.substring(0, splitIndex));
+        if (splitIndex === -1) {
+            splitIndex = maxLength;
+        }
+
+        embed.setDescription(remainingText.substring(0, splitIndex).trim());
         embeds.push(embed);
         remainingText = remainingText.substring(splitIndex).trim();
         isFirst = false;
 
-        if (embeds.length >= 10) break;
+        if (embeds.length >= 15) break; 
     }
     return embeds;
 }
 
-function getTabButtons(currentTab, monsterName, monsterData) {
-    const row = new ActionRowBuilder();
-    if (currentTab !== "basic" && monsterData.info) row.addComponents(new ButtonBuilder().setCustomId(`basic_${monsterName}`).setLabel("기본 정보").setEmoji("1492145251941482697").setStyle(ButtonStyle.Secondary));
-    if (currentTab !== "hitzone" && monsterData.hitzone) row.addComponents(new ButtonBuilder().setCustomId(`hitzone_${monsterName}`).setLabel("육질 정보").setEmoji("1492145248795758602").setStyle(ButtonStyle.Primary));
-    if (currentTab !== "drop" && (monsterData.drop || monsterData.drop_low || monsterData.drop_high)) row.addComponents(new ButtonBuilder().setCustomId(`drop_${monsterName}`).setLabel("소재 정보").setEmoji("1492145247327617185").setStyle(ButtonStyle.Success));
-    if (currentTab !== "status" && monsterData.status) row.addComponents(new ButtonBuilder().setCustomId(`status_${monsterName}`).setLabel("상태이상 정보").setEmoji("1492145250192331015").setStyle(ButtonStyle.Danger));
-    return row.components.length > 0 ? [row] : [];
+function getTabButtons(currentTab, monsterName, monsterData, currentPage = 0, totalPages = 1) {
+    const rows = [];
+    
+    if (totalPages > 1) {
+        const pageRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`${currentTab}_${monsterName}_${currentPage - 1}`).setLabel("◀ 이전").setStyle(ButtonStyle.Primary).setDisabled(currentPage === 0),
+            new ButtonBuilder().setCustomId(`dummy_page`).setLabel(`${currentPage + 1} / ${totalPages}`).setStyle(ButtonStyle.Secondary).setDisabled(true),
+            new ButtonBuilder().setCustomId(`${currentTab}_${monsterName}_${currentPage + 1}`).setLabel("다음 ▶").setStyle(ButtonStyle.Primary).setDisabled(currentPage === totalPages - 1)
+        );
+        rows.push(pageRow);
+    }
+
+    const tabRow = new ActionRowBuilder();
+    if (currentTab !== "basic" && monsterData.info) tabRow.addComponents(new ButtonBuilder().setCustomId(`basic_${monsterName}_0`).setLabel("기본 정보").setEmoji("1492145251941482697").setStyle(ButtonStyle.Secondary));
+    if (currentTab !== "hitzone" && monsterData.hitzone) tabRow.addComponents(new ButtonBuilder().setCustomId(`hitzone_${monsterName}_0`).setLabel("육질 정보").setEmoji("1492145248795758602").setStyle(ButtonStyle.Primary));
+    if (currentTab !== "drop" && (monsterData.drop || monsterData.drop_low || monsterData.drop_high)) tabRow.addComponents(new ButtonBuilder().setCustomId(`drop_${monsterName}_0`).setLabel("소재 정보").setEmoji("1492145247327617185").setStyle(ButtonStyle.Success));
+    if (currentTab !== "status" && monsterData.status) tabRow.addComponents(new ButtonBuilder().setCustomId(`status_${monsterName}_0`).setLabel("상태이상 정보").setEmoji("1492145250192331015").setStyle(ButtonStyle.Danger));
+    
+    if (tabRow.components.length > 0) rows.push(tabRow);
+    return rows;
 }
 
 client.once(Events.ClientReady, async c => {
@@ -128,7 +147,7 @@ client.once(Events.ClientReady, async c => {
                     type: 3, 
                     name: '이름', 
                     description: '검색할 몬스터의 이름을 입력하세요.', 
-                    required: false, // ✅ 이름을 '선택 입력(선택사항)'으로 변경했습니다.
+                    required: false,
                     autocomplete: true 
                 }]
             }]
@@ -147,13 +166,11 @@ client.on(Events.InteractionCreate, async interaction => {
         return;
     }
 
-    // 💡 명령어 입력 처리
     if (interaction.isChatInputCommand()) {
         if (interaction.commandName === '몬스터') {
             if (isCooldownActive(interaction)) return;
             const inputStr = interaction.options.getString('이름');
             
-            // ✅ 이름 없이 /몬스터 만 쳤을 경우 드롭다운 메뉴 띄우기
             if (!inputStr) {
                 const selectMenu = new StringSelectMenuBuilder()
                     .setCustomId('monsterSelect')
@@ -161,40 +178,53 @@ client.on(Events.InteractionCreate, async interaction => {
                     .addOptions(monsterList.map(name => ({ label: name, value: name, emoji: '🐾' })));
 
                 const row = new ActionRowBuilder().addComponents(selectMenu);
+                // 💡 드롭다운 선택 메뉴 출력 시에도 '나만 보기(ephemeral: true)' 적용
                 return interaction.reply({ 
                     content: '📝 **찾으시는 몬스터를 아래 목록에서 선택해 주세요!**', 
-                    components: [row] 
+                    components: [row],
+                    ephemeral: true
                 });
             }
 
-            // 이름을 직접 쳤을 경우 기존처럼 검색
             const userInput = inputStr.trim();
             const monsterName = resolveMonsterName(userInput);
             const monsterData = getMonsterData(monsterName);
             if (!monsterData) return interaction.reply({ content: `<:X_:1493987174750748812> 데이터 없음: \`${userInput}\``, ephemeral: true });
-            await sendPage(interaction, !monsterData.info && monsterData.hitzone ? "hitzone" : "basic", monsterName, monsterData);
+            
+            await sendPage(interaction, !monsterData.info && monsterData.hitzone ? "hitzone" : "basic", monsterName, monsterData, 0);
         }
     }
 
-    // 💡 드롭다운 메뉴에서 몬스터를 골랐을 때 처리
     if (interaction.isStringSelectMenu() && interaction.customId === 'monsterSelect') {
         const monsterName = interaction.values[0];
         const monsterData = getMonsterData(monsterName);
         if (!monsterData) return interaction.reply({ content: `<:X_:1493987174750748812> 데이터 없음: \`${monsterName}\``, ephemeral: true });
         
-        await sendPage(interaction, !monsterData.info && monsterData.hitzone ? "hitzone" : "basic", monsterName, monsterData);
+        await sendPage(interaction, !monsterData.info && monsterData.hitzone ? "hitzone" : "basic", monsterName, monsterData, 0);
     }
 
     if (interaction.isButton()) {
-        const [action, monsterName] = interaction.customId.split('_');
+        const parts = interaction.customId.split('_');
+        const action = parts[0];
+        const monsterName = parts[1];
+        const page = parts.length > 2 ? parseInt(parts[2], 10) : 0;
+        
+        if (action === 'dummy') return;
+        
         const monsterData = getMonsterData(monsterName);
         if (!monsterData) return;
-        if (['dropLow', 'dropHigh'].includes(action)) await sendDropPage(interaction, action === 'dropHigh' ? 'drop_high' : 'drop_low', monsterName, monsterData);
-        else await sendPage(interaction, action, monsterName, monsterData);
+
+        if (['dropLow', 'dropHigh'].includes(action)) {
+            await sendDropPage(interaction, action === 'dropHigh' ? 'drop_high' : 'drop_low', monsterName, monsterData, page);
+        } else if (action === 'drop') {
+            await sendPage(interaction, 'drop', monsterName, monsterData, page);
+        } else {
+            await sendPage(interaction, action, monsterName, monsterData, page);
+        }
     }
 });
 
-async function sendPage(interaction, type, monsterName, monsterData) {
+async function sendPage(interaction, type, monsterName, monsterData, page = 0) {
     const icon = monsterData.icon ? `${monsterData.icon} ` : "";
     let description = `# ${icon}${monsterName}\n`;
 
@@ -209,7 +239,7 @@ async function sendPage(interaction, type, monsterName, monsterData) {
     } else if (type === "hitzone") {
         description += getArrayAsString(monsterData, "hitzone");
     } else if (type === "drop") {
-        if (monsterData.drop_low) return sendDropPage(interaction, 'drop_low', monsterName, monsterData);
+        if (monsterData.drop_low) return sendDropPage(interaction, 'drop_low', monsterName, monsterData, page);
         description += getArrayAsString(monsterData, "drop");
     } else if (type === "status") {
         if (monsterData.status) {
@@ -230,7 +260,7 @@ async function sendPage(interaction, type, monsterName, monsterData) {
         }
 
         if (monsterData.special_attack) {
-            description += `**《 특수 공격 》**\n${monsterData.special_attack.map(el => `> ${el}`).join("\n")}\n\n`;
+            description += `**《 <:Info_4:1492145251941482697> 몬스터의 특수 공격 》**\n${monsterData.special_attack.map(el => `> ${el}`).join("\n")}\n\n`;
         }
 
         if (monsterData.item) {
@@ -247,25 +277,59 @@ async function sendPage(interaction, type, monsterName, monsterData) {
     }
 
     const embeds = splitToEmbeds(monsterName, monsterData, description);
-    const components = getTabButtons(type, monsterName, monsterData);
+    const totalPages = embeds.length;
     
-    // ✅ 드롭다운이나 버튼을 눌렀을 때 메시지를 깔끔하게 덮어씌웁니다. (content: "" 로 안내 문구 삭제)
-    if (interaction.isMessageComponent()) await interaction.update({ content: "", embeds, components });
-    else await interaction.reply({ embeds, components });
+    if (page >= totalPages) page = totalPages - 1;
+    if (page < 0) page = 0;
+
+    const currentEmbed = embeds[page];
+    const components = getTabButtons(type, monsterName, monsterData, page, totalPages);
+    
+    // 💡 임베드 전송 시 '나만 보기(ephemeral: true)' 적용
+    if (interaction.isMessageComponent()) await interaction.update({ content: "", embeds: [currentEmbed], components });
+    else await interaction.reply({ embeds: [currentEmbed], components, ephemeral: true });
 }
 
-async function sendDropPage(interaction, rankKey, monsterName, monsterData) {
+async function sendDropPage(interaction, rankKey, monsterName, monsterData, page = 0) {
     const icon = monsterData.icon ? `${monsterData.icon} ` : "";
     const description = `# ${icon}${monsterName}\n\n${getArrayAsString(monsterData, rankKey)}`;
     const embeds = splitToEmbeds(monsterName, monsterData, description);
-    const rankRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`dropLow_${monsterName}`).setLabel("《 하위 》").setEmoji("1492424259262222356").setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId(`dropHigh_${monsterName}`).setLabel("《 상위 》").setEmoji("1492424261032214589").setStyle(ButtonStyle.Success)
-    );
-    const components = [rankRow, ...getTabButtons("drop", monsterName, monsterData)];
     
-    if (interaction.isMessageComponent()) await interaction.update({ content: "", embeds, components });
-    else await interaction.reply({ embeds, components });
+    const totalPages = embeds.length;
+    if (page >= totalPages) page = totalPages - 1;
+    if (page < 0) page = 0;
+
+    const currentEmbed = embeds[page];
+    const currentAction = rankKey === 'drop_high' ? 'dropHigh' : 'dropLow';
+    
+    const components = [];
+
+    const rankRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`dropLow_${monsterName}_0`).setLabel("《 하위 》").setEmoji("1492424259262222356").setStyle(ButtonStyle.Success).setDisabled(rankKey === 'drop_low'),
+        new ButtonBuilder().setCustomId(`dropHigh_${monsterName}_0`).setLabel("《 상위 》").setEmoji("1492424261032214589").setStyle(ButtonStyle.Success).setDisabled(rankKey === 'drop_high')
+    );
+    
+    if (totalPages > 1) {
+        const pageRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`${currentAction}_${monsterName}_${page - 1}`).setLabel("◀ 이전").setStyle(ButtonStyle.Primary).setDisabled(page === 0),
+            new ButtonBuilder().setCustomId(`dummy_page`).setLabel(`${page + 1} / ${totalPages}`).setStyle(ButtonStyle.Secondary).setDisabled(true),
+            new ButtonBuilder().setCustomId(`${currentAction}_${monsterName}_${page + 1}`).setLabel("다음 ▶").setStyle(ButtonStyle.Primary).setDisabled(page === totalPages - 1)
+        );
+        components.push(pageRow);
+    }
+    
+    components.push(rankRow);
+
+    const tabRow = new ActionRowBuilder();
+    if (monsterData.info) tabRow.addComponents(new ButtonBuilder().setCustomId(`basic_${monsterName}_0`).setLabel("기본 정보").setEmoji("1492145251941482697").setStyle(ButtonStyle.Secondary));
+    if (monsterData.hitzone) tabRow.addComponents(new ButtonBuilder().setCustomId(`hitzone_${monsterName}_0`).setLabel("육질 정보").setEmoji("1492145248795758602").setStyle(ButtonStyle.Primary));
+    if (monsterData.status) tabRow.addComponents(new ButtonBuilder().setCustomId(`status_${monsterName}_0`).setLabel("상태이상 정보").setEmoji("1492145250192331015").setStyle(ButtonStyle.Danger));
+    
+    if (tabRow.components.length > 0) components.push(tabRow);
+
+    // 💡 소재 임베드 전송 시에도 '나만 보기(ephemeral: true)' 적용
+    if (interaction.isMessageComponent()) await interaction.update({ content: "", embeds: [currentEmbed], components });
+    else await interaction.reply({ embeds: [currentEmbed], components, ephemeral: true });
 }
 
 client.login(token);
