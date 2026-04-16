@@ -10,6 +10,5 @@
 - **스마트 버튼 & 도배 방지**: 해당 몬스터에 없는 데이터 탭은 자동으로 숨기며, 10초 쿨타임 시스템(나만 보기 경고창)으로 서버 도배를 완벽히 방지합니다.
 
 ## 기술 스택 (Tech Stack)
-- **Language**: Java 
-- **Library**: [JDA (Java Discord API)](https://github.com/discord-jda/JDA)
+- **Language**: JavaScript
 - **Data Format**: JSON (GSON 라이브러리를 통한 데이터 파싱)
