@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Events, REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, Collection, StringSelectMenuBuilder, ActivityType } = require('discord.js');
+const { Client, GatewayIntentBits, Events, REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, Collection, StringSelectMenuBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -73,17 +73,14 @@ function getArrayAsString(data, key) {
 
 function createBaseEmbed(monsterName, monsterData) {
     const embed = new EmbedBuilder().setColor(monsterData.color || 0xFFFFFF);
-    // 💡 썸네일 무조건 표시되도록 보장
     if (monsterData.thumbnail) embed.setThumbnail(monsterData.thumbnail);
     return embed;
 }
 
-// 💡 매 페이지마다 헤더(이름)와 썸네일을 유지하도록 로직 변경
 function splitToEmbeds(monsterName, monsterData, contentText) {
     const embeds = [];
     const maxLength = 2200; 
     
-    // 헤더(제목 부분)를 밖으로 빼서 고정시킵니다.
     const icon = monsterData.icon ? `${monsterData.icon} ` : "";
     const header = `# ${icon}${monsterName}\n\n`;
 
@@ -91,9 +88,6 @@ function splitToEmbeds(monsterName, monsterData, contentText) {
 
     while (remainingText.length > 0) {
         const embed = createBaseEmbed(monsterName, monsterData);
-        // 기존의 2페이지부터 썸네일 날리던 코드 삭제 완료!
-
-        // 헤더 글자 수만큼 여유 공간 계산
         const availableLength = maxLength - header.length;
 
         if (remainingText.length <= availableLength) {
@@ -112,7 +106,6 @@ function splitToEmbeds(monsterName, monsterData, contentText) {
             splitIndex = availableLength;
         }
 
-        // 항상 헤더를 맨 위에 붙이고 그 뒤에 자른 내용을 덧붙임
         embed.setDescription(header + remainingText.substring(0, splitIndex).trim());
         embeds.push(embed);
         remainingText = remainingText.substring(splitIndex).trim();
@@ -147,10 +140,7 @@ function getTabButtons(currentTab, monsterName, monsterData, currentPage = 0, to
 client.once(Events.ClientReady, async c => {
     console.log(`✅ 봇 로그인 완료: ${c.user.tag}`);
     
-    c.user.setActivity('/몬스터', { 
-        type: ActivityType.Streaming,
-        url: 'https://twitch.tv/discord' 
-    });
+    // 방송 중 상태 표시(setActivity) 기능이 제거되었습니다.
 
     const rest = new REST({ version: '10' }).setToken(token);
     try {
@@ -161,7 +151,7 @@ client.once(Events.ClientReady, async c => {
                 options: [{
                     type: 3, 
                     name: '이름', 
-                    description: '검색할 몬스터의 이름을 입력하세요. (별명이나 줄임말로도 검색 가능)', 
+                    description: '검색할 몬스터의 이름을 입력하세요.', 
                     required: false,
                     autocomplete: true 
                 }]
@@ -189,13 +179,13 @@ client.on(Events.InteractionCreate, async interaction => {
             if (!inputStr) {
                 const selectMenu = new StringSelectMenuBuilder()
                     .setCustomId('monsterSelect')
-                    .setPlaceholder('🔎 확인하고 싶은 몬스터를 선택하세요')
-                    .addOptions(monsterList.map(name => ({ label: name, value: name })));
+                    .setPlaceholder('🔍 확인하고 싶은 몬스터를 선택하세요')
+                    .addOptions(monsterList.map(name => ({ label: name, value: name, emoji: '🐾' })));
 
                 const row = new ActionRowBuilder().addComponents(selectMenu);
                 return interaction.reply({ 
-                    content: '📖 **찾으시는 몬스터를 아래 목록에서 선택해 주세요!**', 
-                    components: [row], 
+                    content: '📝 **찾으시는 몬스터를 아래 목록에서 선택해 주세요!**', 
+                    components: [row],
                     ephemeral: true
                 });
             }
@@ -239,7 +229,6 @@ client.on(Events.InteractionCreate, async interaction => {
 });
 
 async function sendPage(interaction, type, monsterName, monsterData, page = 0) {
-    // 💡 헤더 처리는 splitToEmbeds에서 하므로 여기서는 내용물만 만듭니다.
     let description = "";
 
     if (type === "basic") {
@@ -304,7 +293,6 @@ async function sendPage(interaction, type, monsterName, monsterData, page = 0) {
 }
 
 async function sendDropPage(interaction, rankKey, monsterName, monsterData, page = 0) {
-    // 💡 헤더 처리는 splitToEmbeds에서 자동 처리되므로 본문만 넘깁니다.
     const description = getArrayAsString(monsterData, rankKey);
     const embeds = splitToEmbeds(monsterName, monsterData, description);
     
