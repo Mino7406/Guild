@@ -77,17 +77,26 @@ function createBaseEmbed(monsterName, monsterData) {
     return embed;
 }
 
-function splitToEmbeds(monsterName, monsterData, contentText) {
+function splitToEmbeds(monsterName, monsterData, fullDescription) {
     const embeds = [];
-    const maxLength = 2200; 
+    const maxLength = 2200;
     
-    const icon = monsterData.icon ? `${monsterData.icon} ` : "";
-    const header = `# ${icon}${monsterName}\n\n`;
-
-    let remainingText = contentText;
+    // 기존 마크다운 양식을 파괴하지 않기 위해, 첫 줄(헤더)만 안전하게 분리
+    let header = "";
+    let remainingText = fullDescription;
+    
+    if (fullDescription.startsWith('# ')) {
+        const firstLineEnd = fullDescription.indexOf('\n');
+        if (firstLineEnd !== -1) {
+            header = fullDescription.substring(0, firstLineEnd + 1);
+            remainingText = fullDescription.substring(firstLineEnd + 1);
+        }
+    }
 
     while (remainingText.length > 0) {
         const embed = createBaseEmbed(monsterName, monsterData);
+        // 썸네일 삭제 로직(isFirst) 완전 제거 -> 모든 페이지에 썸네일 유지
+
         const availableLength = maxLength - header.length;
 
         if (remainingText.length <= availableLength) {
@@ -97,51 +106,45 @@ function splitToEmbeds(monsterName, monsterData, contentText) {
         }
 
         let splitIndex = remainingText.lastIndexOf('\n\n', availableLength);
-        
         if (splitIndex === -1 || splitIndex < availableLength * 0.6) {
             splitIndex = remainingText.lastIndexOf('\n', availableLength);
         }
-
         if (splitIndex === -1) {
             splitIndex = availableLength;
         }
 
-        embed.setDescription(header + remainingText.substring(0, splitIndex).trim());
+        embed.setDescription(header + remainingText.substring(0, splitIndex));
         embeds.push(embed);
         remainingText = remainingText.substring(splitIndex).trim();
-
-        if (embeds.length >= 15) break; 
+        
+        if (embeds.length >= 15) break;
     }
     return embeds;
 }
 
-function getTabButtons(currentTab, monsterName, monsterData, currentPage = 0, totalPages = 1) {
-    const rows = [];
-    
-    if (totalPages > 1) {
-        const pageRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`${currentTab}_${monsterName}_${currentPage - 1}`).setLabel("◀ 이전").setStyle(ButtonStyle.Primary).setDisabled(currentPage === 0),
-            new ButtonBuilder().setCustomId(`dummy_page`).setLabel(`${currentPage + 1} / ${totalPages}`).setStyle(ButtonStyle.Secondary).setDisabled(true),
-            new ButtonBuilder().setCustomId(`${currentTab}_${monsterName}_${currentPage + 1}`).setLabel("다음 ▶").setStyle(ButtonStyle.Primary).setDisabled(currentPage === totalPages - 1)
-        );
-        rows.push(pageRow);
-    }
+// 기존에 작성하셨던 탭 버튼 로직 100% 원상복구 (버튼 ID 왜곡 방지)
+function getTabButtons(currentTab, monsterName, monsterData) {
+    const row = new ActionRowBuilder();
+    if (currentTab !== "basic" && monsterData.info) row.addComponents(new ButtonBuilder().setCustomId(`basic_${monsterName}`).setLabel("기본 정보").setEmoji("1492145251941482697").setStyle(ButtonStyle.Secondary));
+    if (currentTab !== "hitzone" && monsterData.hitzone) row.addComponents(new ButtonBuilder().setCustomId(`hitzone_${monsterName}`).setLabel("육질 정보").setEmoji("1492145248795758602").setStyle(ButtonStyle.Primary));
+    if (currentTab !== "drop" && (monsterData.drop || monsterData.drop_low || monsterData.drop_high)) row.addComponents(new ButtonBuilder().setCustomId(`drop_${monsterName}`).setLabel("소재 정보").setEmoji("1492145247327617185").setStyle(ButtonStyle.Success));
+    if (currentTab !== "status" && monsterData.status) row.addComponents(new ButtonBuilder().setCustomId(`status_${monsterName}`).setLabel("상태이상 정보").setEmoji("1492145250192331015").setStyle(ButtonStyle.Danger));
+    return row.components.length > 0 ? [row] : [];
+}
 
-    const tabRow = new ActionRowBuilder();
-    if (currentTab !== "basic" && monsterData.info) tabRow.addComponents(new ButtonBuilder().setCustomId(`basic_${monsterName}_0`).setLabel("기본 정보").setEmoji("1492145251941482697").setStyle(ButtonStyle.Secondary));
-    if (currentTab !== "hitzone" && monsterData.hitzone) tabRow.addComponents(new ButtonBuilder().setCustomId(`hitzone_${monsterName}_0`).setLabel("육질 정보").setEmoji("1492145248795758602").setStyle(ButtonStyle.Primary));
-    if (currentTab !== "drop" && (monsterData.drop || monsterData.drop_low || monsterData.drop_high)) tabRow.addComponents(new ButtonBuilder().setCustomId(`drop_${monsterName}_0`).setLabel("소재 정보").setEmoji("1492145247327617185").setStyle(ButtonStyle.Success));
-    if (currentTab !== "status" && monsterData.status) tabRow.addComponents(new ButtonBuilder().setCustomId(`status_${monsterName}_0`).setLabel("상태이상 정보").setEmoji("1492145250192331015").setStyle(ButtonStyle.Danger));
-    
-    if (tabRow.components.length > 0) rows.push(tabRow);
-    return rows;
+// 탭 버튼과 섞이지 않도록 페이지네이션 버튼만 생성하는 독립 함수 추가
+function getPaginationRow(currentAction, monsterName, currentPage, totalPages) {
+    if (totalPages <= 1) return [];
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`${currentAction}_${monsterName}_${currentPage - 1}`).setLabel("◀ 이전").setStyle(ButtonStyle.Primary).setDisabled(currentPage === 0),
+        new ButtonBuilder().setCustomId(`dummy_page`).setLabel(`${currentPage + 1} / ${totalPages}`).setStyle(ButtonStyle.Secondary).setDisabled(true),
+        new ButtonBuilder().setCustomId(`${currentAction}_${monsterName}_${currentPage + 1}`).setLabel("다음 ▶").setStyle(ButtonStyle.Primary).setDisabled(currentPage === totalPages - 1)
+    );
+    return [row];
 }
 
 client.once(Events.ClientReady, async c => {
     console.log(`✅ 봇 로그인 완료: ${c.user.tag}`);
-    
-    // 방송 중 상태 표시(setActivity) 기능이 제거되었습니다.
-
     const rest = new REST({ version: '10' }).setToken(token);
     try {
         await rest.put(Routes.applicationCommands(c.user.id), {
@@ -151,7 +154,7 @@ client.once(Events.ClientReady, async c => {
                 options: [{
                     type: 3, 
                     name: '이름', 
-                    description: '검색할 몬스터의 이름을 입력하세요.', 
+                    description: '검색할 몬스터의 이름을 입력하세요. (별명이나 줄임말로도 검색 가능)', 
                     required: false,
                     autocomplete: true 
                 }]
@@ -194,7 +197,6 @@ client.on(Events.InteractionCreate, async interaction => {
             const monsterName = resolveMonsterName(userInput);
             const monsterData = getMonsterData(monsterName);
             if (!monsterData) return interaction.reply({ content: `<:X_:1493987174750748812> 데이터 없음: \`${userInput}\``, ephemeral: true });
-            
             await sendPage(interaction, !monsterData.info && monsterData.hitzone ? "hitzone" : "basic", monsterName, monsterData, 0);
         }
     }
@@ -211,25 +213,22 @@ client.on(Events.InteractionCreate, async interaction => {
         const parts = interaction.customId.split('_');
         const action = parts[0];
         const monsterName = parts[1];
+        // 탭 버튼을 눌렀을 때는 page 정보가 없으므로 0으로 초기화
         const page = parts.length > 2 ? parseInt(parts[2], 10) : 0;
         
         if (action === 'dummy') return;
-        
+
         const monsterData = getMonsterData(monsterName);
         if (!monsterData) return;
-
-        if (['dropLow', 'dropHigh'].includes(action)) {
-            await sendDropPage(interaction, action === 'dropHigh' ? 'drop_high' : 'drop_low', monsterName, monsterData, page);
-        } else if (action === 'drop') {
-            await sendPage(interaction, 'drop', monsterName, monsterData, page);
-        } else {
-            await sendPage(interaction, action, monsterName, monsterData, page);
-        }
+        if (['dropLow', 'dropHigh'].includes(action)) await sendDropPage(interaction, action === 'dropHigh' ? 'drop_high' : 'drop_low', monsterName, monsterData, page);
+        else await sendPage(interaction, action, monsterName, monsterData, page);
     }
 });
 
+// 기존 마크다운 구축 로직 100% 복구
 async function sendPage(interaction, type, monsterName, monsterData, page = 0) {
-    let description = "";
+    const icon = monsterData.icon ? `${monsterData.icon} ` : "";
+    let description = `# ${icon}${monsterName}\n`;
 
     if (type === "basic") {
         if (monsterData.species) description += `**【 ${monsterData.species} 】**\n\n`;
@@ -263,7 +262,7 @@ async function sendPage(interaction, type, monsterName, monsterData, page = 0) {
         }
 
         if (monsterData.special_attack) {
-            description += `**《 특수 공격 》**\n${monsterData.special_attack.map(el => `> ${el}`).join("\n")}\n\n`;
+            description += `**《 <:Info_4:1492145251941482697> 몬스터의 특수 공격 》**\n${monsterData.special_attack.map(el => `> ${el}`).join("\n")}\n\n`;
         }
 
         if (monsterData.item) {
@@ -281,55 +280,44 @@ async function sendPage(interaction, type, monsterName, monsterData, page = 0) {
 
     const embeds = splitToEmbeds(monsterName, monsterData, description);
     const totalPages = embeds.length;
-    
     if (page >= totalPages) page = totalPages - 1;
     if (page < 0) page = 0;
 
-    const currentEmbed = embeds[page];
-    const components = getTabButtons(type, monsterName, monsterData, page, totalPages);
+    // 탭 버튼(기존)과 페이지 버튼(신규)을 안전하게 결합
+    const components = [
+        ...getPaginationRow(type, monsterName, page, totalPages),
+        ...getTabButtons(type, monsterName, monsterData)
+    ];
     
-    if (interaction.isMessageComponent()) await interaction.update({ content: "", embeds: [currentEmbed], components });
-    else await interaction.reply({ embeds: [currentEmbed], components, ephemeral: true });
+    if (interaction.isMessageComponent()) await interaction.update({ content: "", embeds: [embeds[page]], components });
+    else await interaction.reply({ embeds: [embeds[page]], components, ephemeral: true });
 }
 
+// 소재 전용 페이지 역시 기존 마크다운 구축 로직 100% 복구
 async function sendDropPage(interaction, rankKey, monsterName, monsterData, page = 0) {
-    const description = getArrayAsString(monsterData, rankKey);
+    const icon = monsterData.icon ? `${monsterData.icon} ` : "";
+    const description = `# ${icon}${monsterName}\n\n${getArrayAsString(monsterData, rankKey)}`;
     const embeds = splitToEmbeds(monsterName, monsterData, description);
     
     const totalPages = embeds.length;
     if (page >= totalPages) page = totalPages - 1;
     if (page < 0) page = 0;
 
-    const currentEmbed = embeds[page];
-    const currentAction = rankKey === 'drop_high' ? 'dropHigh' : 'dropLow';
-    
-    const components = [];
-
     const rankRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`dropLow_${monsterName}_0`).setLabel("《 하위 》").setEmoji("1492424259262222356").setStyle(ButtonStyle.Success).setDisabled(rankKey === 'drop_low'),
-        new ButtonBuilder().setCustomId(`dropHigh_${monsterName}_0`).setLabel("《 상위 》").setEmoji("1492424261032214589").setStyle(ButtonStyle.Success).setDisabled(rankKey === 'drop_high')
+        new ButtonBuilder().setCustomId(`dropLow_${monsterName}`).setLabel("《 하위 》").setEmoji("1492424259262222356").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`dropHigh_${monsterName}`).setLabel("《 상위 》").setEmoji("1492424261032214589").setStyle(ButtonStyle.Success)
     );
     
-    if (totalPages > 1) {
-        const pageRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`${currentAction}_${monsterName}_${page - 1}`).setLabel("◀ 이전").setStyle(ButtonStyle.Primary).setDisabled(page === 0),
-            new ButtonBuilder().setCustomId(`dummy_page`).setLabel(`${page + 1} / ${totalPages}`).setStyle(ButtonStyle.Secondary).setDisabled(true),
-            new ButtonBuilder().setCustomId(`${currentAction}_${monsterName}_${page + 1}`).setLabel("다음 ▶").setStyle(ButtonStyle.Primary).setDisabled(page === totalPages - 1)
-        );
-        components.push(pageRow);
-    }
+    const currentAction = rankKey === 'drop_high' ? 'dropHigh' : 'dropLow';
     
-    components.push(rankRow);
-
-    const tabRow = new ActionRowBuilder();
-    if (monsterData.info) tabRow.addComponents(new ButtonBuilder().setCustomId(`basic_${monsterName}_0`).setLabel("기본 정보").setEmoji("1492145251941482697").setStyle(ButtonStyle.Secondary));
-    if (monsterData.hitzone) tabRow.addComponents(new ButtonBuilder().setCustomId(`hitzone_${monsterName}_0`).setLabel("육질 정보").setEmoji("1492145248795758602").setStyle(ButtonStyle.Primary));
-    if (monsterData.status) tabRow.addComponents(new ButtonBuilder().setCustomId(`status_${monsterName}_0`).setLabel("상태이상 정보").setEmoji("1492145250192331015").setStyle(ButtonStyle.Danger));
+    const components = [
+        ...getPaginationRow(currentAction, monsterName, page, totalPages),
+        rankRow,
+        ...getTabButtons("drop", monsterName, monsterData)
+    ];
     
-    if (tabRow.components.length > 0) components.push(tabRow);
-
-    if (interaction.isMessageComponent()) await interaction.update({ content: "", embeds: [currentEmbed], components });
-    else await interaction.reply({ embeds: [currentEmbed], components, ephemeral: true });
+    if (interaction.isMessageComponent()) await interaction.update({ content: "", embeds: [embeds[page]], components });
+    else await interaction.reply({ embeds: [embeds[page]], components, ephemeral: true });
 }
 
 client.login(token);
