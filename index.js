@@ -1,12 +1,12 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Events, REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, Collection } = require('discord.js');
+// ✅ StringSelectMenuBuilder 가 추가되었습니다.
+const { Client, GatewayIntentBits, Events, REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, Collection, StringSelectMenuBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
 const token = process.env.DISCORD_TOKEN;
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-// 몬스터 목록 및 별명 데이터
 const monsterList = [
     "레 다우", "우드 투나", "누 이그드라", "진 다하드", "리오레우스", "조 시아", "알슈베르도", "고어 마가라",
     "타마미츠네", "라기아크루스", "셀레기오스", "오메가 플라네테스", "고그마지오스", "고양이 훈련 통 펀처"
@@ -29,7 +29,6 @@ const monsterAliases = {
     "고양이 훈련 통 펀처": ["펀처", "고양이 훈련 통", "훈련 통 펀처", "연습장", "연습", "훈련", "수련장", "수련"]
 };
 
-// 쿨타임 설정
 const cooldowns = new Collection();
 const COOLDOWN_TIME = 10000;
 
@@ -79,32 +78,31 @@ function createBaseEmbed(monsterName, monsterData) {
     return embed;
 }
 
-// 💡 텍스트 분할 처리 (두 번째 카드부터 썸네일 제거 로직 적용)
 function splitToEmbeds(monsterName, monsterData, fullDescription) {
     const embeds = [];
-    const maxLength = 3800;
+    const maxLength = 2800;
     let remainingText = fullDescription;
-    let isFirst = true; // 첫 번째 카드인지 확인
+    let isFirst = true;
 
     while (remainingText.length > 0) {
         const embed = createBaseEmbed(monsterName, monsterData);
-        
-        // ✅ 두 번째 카드(페이지)부터는 썸네일(아이콘)을 비표시합니다.
-        if (!isFirst) {
-            embed.setThumbnail(null);
-        }
+        if (!isFirst) embed.setThumbnail(null);
 
         if (remainingText.length <= maxLength) {
             embed.setDescription(remainingText);
             embeds.push(embed);
             break;
         }
+
         let splitIndex = remainingText.lastIndexOf('\n', maxLength);
         if (splitIndex === -1) splitIndex = maxLength;
+
         embed.setDescription(remainingText.substring(0, splitIndex));
         embeds.push(embed);
         remainingText = remainingText.substring(splitIndex).trim();
-        isFirst = false; // 이후 루프부터는 첫 번째가 아님
+        isFirst = false;
+
+        if (embeds.length >= 10) break;
     }
     return embeds;
 }
@@ -125,12 +123,12 @@ client.once(Events.ClientReady, async c => {
         await rest.put(Routes.applicationCommands(c.user.id), {
             body: [{
                 name: '몬스터',
-                description: '해당 몬스터의 정보를 확인합니다. 【현재 9성 몬스터까지만 지원】',
+                description: '해당 몬스터의 정보를 확인합니다.',
                 options: [{
                     type: 3, 
                     name: '이름', 
-                    description: '검색할 몬스터의 이름을 입력하세요. 【별명이나 줄임말로도 검색 가능합니다.】', 
-                    required: true, 
+                    description: '검색할 몬스터의 이름을 입력하세요.', 
+                    required: false, // ✅ 이름을 '선택 입력(선택사항)'으로 변경했습니다.
                     autocomplete: true 
                 }]
             }]
@@ -149,15 +147,42 @@ client.on(Events.InteractionCreate, async interaction => {
         return;
     }
 
+    // 💡 명령어 입력 처리
     if (interaction.isChatInputCommand()) {
         if (interaction.commandName === '몬스터') {
             if (isCooldownActive(interaction)) return;
-            const userInput = interaction.options.getString('이름').trim();
+            const inputStr = interaction.options.getString('이름');
+            
+            // ✅ 이름 없이 /몬스터 만 쳤을 경우 드롭다운 메뉴 띄우기
+            if (!inputStr) {
+                const selectMenu = new StringSelectMenuBuilder()
+                    .setCustomId('monsterSelect')
+                    .setPlaceholder('🔍 확인하고 싶은 몬스터를 선택하세요')
+                    .addOptions(monsterList.map(name => ({ label: name, value: name, emoji: '🐾' })));
+
+                const row = new ActionRowBuilder().addComponents(selectMenu);
+                return interaction.reply({ 
+                    content: '📝 **찾으시는 몬스터를 아래 목록에서 선택해 주세요!**', 
+                    components: [row] 
+                });
+            }
+
+            // 이름을 직접 쳤을 경우 기존처럼 검색
+            const userInput = inputStr.trim();
             const monsterName = resolveMonsterName(userInput);
             const monsterData = getMonsterData(monsterName);
             if (!monsterData) return interaction.reply({ content: `<:X_:1493987174750748812> 데이터 없음: \`${userInput}\``, ephemeral: true });
             await sendPage(interaction, !monsterData.info && monsterData.hitzone ? "hitzone" : "basic", monsterName, monsterData);
         }
+    }
+
+    // 💡 드롭다운 메뉴에서 몬스터를 골랐을 때 처리
+    if (interaction.isStringSelectMenu() && interaction.customId === 'monsterSelect') {
+        const monsterName = interaction.values[0];
+        const monsterData = getMonsterData(monsterName);
+        if (!monsterData) return interaction.reply({ content: `<:X_:1493987174750748812> 데이터 없음: \`${monsterName}\``, ephemeral: true });
+        
+        await sendPage(interaction, !monsterData.info && monsterData.hitzone ? "hitzone" : "basic", monsterName, monsterData);
     }
 
     if (interaction.isButton()) {
@@ -178,7 +203,7 @@ async function sendPage(interaction, type, monsterName, monsterData) {
         description += `${getArrayAsString(monsterData, "info")}\n\n`;
         if (monsterData.habitat) description += `**《 서식지 》**\n> ${monsterData.habitat}\n\n`;
         if (monsterData.threat_level) description += `**《 위험도 》**\n> ${monsterData.threat_level}\n\n`;
-        [['breakable_parts', '파괴 가능 부위'], ['weak_point', '약점'], ['element_weakness', '추천 속성']].forEach(([k, t]) => {
+        [['breakable_parts', '절단/파괴 가능 부위'], ['weak_point', '약점'], ['element_weakness', '추천 속성']].forEach(([k, t]) => {
             if (monsterData[k]) description += `**《 ${t} 》**\n${monsterData[k].map(el => `> ${el.trim()}`).join("\n")}\n\n`;
         });
     } else if (type === "hitzone") {
@@ -187,7 +212,6 @@ async function sendPage(interaction, type, monsterName, monsterData) {
         if (monsterData.drop_low) return sendDropPage(interaction, 'drop_low', monsterName, monsterData);
         description += getArrayAsString(monsterData, "drop");
     } else if (type === "status") {
-        // 🌟 [수정] 자바 방식: 앞쪽 아이콘은 유지, 뒷쪽 중복 괄호/이모지는 삭제
         if (monsterData.status) {
             const groups = { s3: [], s2: [], s1: [], s0: [] };
             monsterData.status.forEach(el => {
@@ -205,9 +229,8 @@ async function sendPage(interaction, type, monsterName, monsterData) {
             if (groups.s0.length) description += `**《 <:X_:1493987174750748812> 효과 없음 》**\n${groups.s0.join("\n")}\n\n`;
         }
 
-        // 🌟 특수 공격 위치 (상태이상 바로 아래)
         if (monsterData.special_attack) {
-            description += `**《 <:Info_4:1492145251941482697> 몬스터의 특수 공격 》**\n${monsterData.special_attack.map(el => `> ${el}`).join("\n")}\n\n`;
+            description += `**《 특수 공격 》**\n${monsterData.special_attack.map(el => `> ${el}`).join("\n")}\n\n`;
         }
 
         if (monsterData.item) {
@@ -225,7 +248,9 @@ async function sendPage(interaction, type, monsterName, monsterData) {
 
     const embeds = splitToEmbeds(monsterName, monsterData, description);
     const components = getTabButtons(type, monsterName, monsterData);
-    if (interaction.isButton()) await interaction.update({ embeds, components });
+    
+    // ✅ 드롭다운이나 버튼을 눌렀을 때 메시지를 깔끔하게 덮어씌웁니다. (content: "" 로 안내 문구 삭제)
+    if (interaction.isMessageComponent()) await interaction.update({ content: "", embeds, components });
     else await interaction.reply({ embeds, components });
 }
 
@@ -238,7 +263,9 @@ async function sendDropPage(interaction, rankKey, monsterName, monsterData) {
         new ButtonBuilder().setCustomId(`dropHigh_${monsterName}`).setLabel("《 상위 》").setEmoji("1492424261032214589").setStyle(ButtonStyle.Success)
     );
     const components = [rankRow, ...getTabButtons("drop", monsterName, monsterData)];
-    await interaction.update({ embeds, components });
+    
+    if (interaction.isMessageComponent()) await interaction.update({ content: "", embeds, components });
+    else await interaction.reply({ embeds, components });
 }
 
 client.login(token);
