@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Events, REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, Collection, StringSelectMenuBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Events, REST, Routes, ActionRowBuilder, ButtonBuilder, ButtonStyle, Collection, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, SectionBuilder, ThumbnailBuilder, MessageFlags, resolveColor } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -10,23 +10,6 @@ const monsterList = [
     "레 다우", "우드 투나", "누 이그드라", "진 다하드", "리오레우스", "조 시아", "알슈베르도", "고어 마가라",
     "타마미츠네", "라기아크루스", "셀레기오스", "오메가 플라네테스", "고그마지오스", "고양이 훈련 통 펀처"
 ];
-
-const monsterAliases = {
-    "레 다우": ["레다우", "레", "레황", "황뢰룡"],
-    "우드 투나": ["우드", "우드투나", "참치", "나무참치", "나무 참치", "파의룡"],
-    "누 이그드라": ["누", "누이그드라", "누따끄", "마따끄", "문어", "염옥소"],
-    "진 다하드": ["찐따", "진다", "진다하드", "찐따하드", "이긴다 소프트", "동봉룡"],
-    "리오레우스": ["레우스", "리오", "화룡"],
-    "조 시아": ["바퀴벌레", "조시아", "백열룡"],
-    "고어 마가라": ["고어마가라", "고어", "마가라", "고아", "흑식룡"],
-    "알슈베르도": ["알슈", "뉴트리아", "나타", "쇄인룡"],
-    "타마미츠네": ["타마", "미츠네", "여우", "거품", "포호룡"],
-    "라기아크루스": ["라기", "라기아", "악어", "수중전", "해룡"],
-    "셀레기오스": ["셀레기", "제트킥", "째트킥", "셀레", "칼날비늘", "천인룡"],
-    "오메가 플라네테스": ["오메가", "파판", "파이널판타지", "파이널 판타지", "기계", "메카", "풍뎅이", "메카풍뎅이", "병신"],
-    "고그마지오스": ["고그", "고그마", "고구마", "거극룡", "거극", "파룡포", "기름"],
-    "고양이 훈련 통 펀처": ["펀처", "고양이 훈련 통", "훈련 통 펀처", "연습장", "연습", "훈련", "수련장", "수련"]
-};
 
 const cooldowns = new Collection();
 const COOLDOWN_TIME = 10000;
@@ -39,7 +22,7 @@ function isCooldownActive(interaction) {
         const timePassed = currentTime - lastTime;
         if (timePassed < COOLDOWN_TIME) {
             const remainingSeconds = Math.ceil((COOLDOWN_TIME - timePassed) / 1000);
-            interaction.reply({ content: `<:Timer:1493995200488669217> **${remainingSeconds}초** 후에 다시 시도해 주세요!`, ephemeral: true });
+            interaction.reply(buildNoticeMessage(`<:Timer:1493995200488669217> **${remainingSeconds}초** 후에 다시 시도해 주세요!`));
             return true;
         }
     }
@@ -47,15 +30,48 @@ function isCooldownActive(interaction) {
     return false;
 }
 
-function normalize(str) { return (str || "").replace(/ /g, "").toLowerCase(); }
+const V2_EPHEMERAL = MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral;
+const DEFAULT_ACCENT = 0x5865F2;
 
-function resolveMonsterName(input) {
-    const normalizedInput = normalize(input);
-    for (const official of monsterList) if (normalize(official) === normalizedInput) return official;
-    for (const [key, aliases] of Object.entries(monsterAliases)) {
-        for (const alias of aliases) if (normalize(alias) === normalizedInput) return key;
+// 쿨타임/오류 안내도 Components V2 컨테이너로 보낸다
+function buildNoticeMessage(text) {
+    const container = new ContainerBuilder()
+        .setAccentColor(DEFAULT_ACCENT)
+        .addTextDisplayComponents(new TextDisplayBuilder().setContent(text));
+    return { components: [container], flags: V2_EPHEMERAL };
+}
+
+// /몬스터 목록: Components V2 컨테이너 안에 몬스터 버튼을 한 줄에 5개씩 배치
+const MONSTER_BUTTONS_PER_ROW = 5;
+
+function buildMonsterListContainer() {
+    const container = new ContainerBuilder()
+        .setAccentColor(DEFAULT_ACCENT)
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent('# 몬스터 목록\n확인하고 싶은 몬스터를 눌러 주세요.')
+        )
+        .addSeparatorComponents(
+            new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+        );
+
+    for (let i = 0; i < monsterList.length; i += MONSTER_BUTTONS_PER_ROW) {
+        const row = new ActionRowBuilder().addComponents(
+            monsterList.slice(i, i + MONSTER_BUTTONS_PER_ROW).map(name =>
+                new ButtonBuilder().setCustomId(`pick_${name}`).setLabel(name).setStyle(ButtonStyle.Secondary)
+            )
+        );
+        container.addActionRowComponents(row);
     }
-    return input;
+
+    return container;
+}
+
+// 버튼을 누르면 같은 메시지를 새 화면으로 갱신하고, 슬래시 명령이면 새 메시지로 보낸다.
+// 봇 업데이트 전에 보낸 옛 임베드 메시지의 버튼은 V2로 바꿀 수 없으므로 새 메시지로 띄운다.
+async function respondWithContainer(interaction, container) {
+    const canUpdate = interaction.isMessageComponent() && interaction.message.flags.has(MessageFlags.IsComponentsV2);
+    if (canUpdate) await interaction.update({ components: [container], flags: MessageFlags.IsComponentsV2 });
+    else await interaction.reply({ components: [container], flags: V2_EPHEMERAL });
 }
 
 function getMonsterData(monsterName) {
@@ -71,14 +87,34 @@ function getArrayAsString(data, key) {
     return Array.isArray(data[key]) ? data[key].join("\n") : data[key];
 }
 
-function createBaseEmbed(monsterName, monsterData) {
-    const embed = new EmbedBuilder().setColor(monsterData.color || 0xFFFFFF);
-    if (monsterData.thumbnail) embed.setThumbnail(monsterData.thumbnail);
-    return embed;
+// 몬스터 화면 한 페이지 = 컨테이너(몬스터 색) 안에 [본문 + 썸네일] 섹션, 구분선, 버튼 줄들
+function buildMonsterPageContainer(monsterData, text, rows) {
+    let accent = 0xFFFFFF;
+    try { if (monsterData.color) accent = resolveColor(monsterData.color); } catch (e) { /* 잘못된 색상값이면 흰색 */ }
+
+    const container = new ContainerBuilder().setAccentColor(accent);
+    const body = new TextDisplayBuilder().setContent(text);
+
+    if (monsterData.thumbnail) {
+        container.addSectionComponents(
+            new SectionBuilder()
+                .addTextDisplayComponents(body)
+                .setThumbnailAccessory(new ThumbnailBuilder().setURL(monsterData.thumbnail))
+        );
+    } else {
+        container.addTextDisplayComponents(body);
+    }
+
+    if (rows.length) {
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+        container.addActionRowComponents(rows);
+    }
+    return container;
 }
 
-function splitToEmbeds(monsterName, monsterData, fullDescription) {
-    const embeds = [];
+// 긴 본문을 페이지 단위 텍스트로 나눈다 (모든 페이지에 "# 몬스터 이름" 헤더 유지)
+function splitToPages(fullDescription) {
+    const pages = [];
     const maxLength = 2200;
     
     // 기존 마크다운 양식을 파괴하지 않기 위해, 첫 줄(헤더)만 안전하게 분리
@@ -94,14 +130,10 @@ function splitToEmbeds(monsterName, monsterData, fullDescription) {
     }
 
     while (remainingText.length > 0) {
-        const embed = createBaseEmbed(monsterName, monsterData);
-        // 썸네일 삭제 로직(isFirst) 완전 제거 -> 모든 페이지에 썸네일 유지
-
         const availableLength = maxLength - header.length;
 
         if (remainingText.length <= availableLength) {
-            embed.setDescription(header + remainingText);
-            embeds.push(embed);
+            pages.push(header + remainingText);
             break;
         }
 
@@ -113,18 +145,18 @@ function splitToEmbeds(monsterName, monsterData, fullDescription) {
             splitIndex = availableLength;
         }
 
-        embed.setDescription(header + remainingText.substring(0, splitIndex));
-        embeds.push(embed);
+        pages.push(header + remainingText.substring(0, splitIndex));
         remainingText = remainingText.substring(splitIndex).trim();
-        
-        if (embeds.length >= 15) break;
+
+        if (pages.length >= 15) break;
     }
-    return embeds;
+    return pages;
 }
 
 // 기존에 작성하셨던 탭 버튼 로직 100% 원상복구 (버튼 ID 왜곡 방지)
 function getTabButtons(currentTab, monsterName, monsterData) {
     const row = new ActionRowBuilder();
+    row.addComponents(new ButtonBuilder().setCustomId('list').setLabel("목록").setEmoji("📋").setStyle(ButtonStyle.Secondary));
     if (currentTab !== "basic" && monsterData.info) row.addComponents(new ButtonBuilder().setCustomId(`basic_${monsterName}`).setLabel("기본 정보").setEmoji("1492145251941482697").setStyle(ButtonStyle.Secondary));
     if (currentTab !== "hitzone" && monsterData.hitzone) row.addComponents(new ButtonBuilder().setCustomId(`hitzone_${monsterName}`).setLabel("육질 정보").setEmoji("1492145248795758602").setStyle(ButtonStyle.Primary));
     if (currentTab !== "drop" && (monsterData.drop || monsterData.drop_low || monsterData.drop_high)) row.addComponents(new ButtonBuilder().setCustomId(`drop_${monsterName}`).setLabel("소재 정보").setEmoji("1492145247327617185").setStyle(ButtonStyle.Success));
@@ -150,63 +182,16 @@ client.once(Events.ClientReady, async c => {
         await rest.put(Routes.applicationCommands(c.user.id), {
             body: [{
                 name: '몬스터',
-                description: '해당 몬스터의 정보를 확인합니다.',
-                options: [{
-                    type: 3, 
-                    name: '이름', 
-                    description: '검색할 몬스터의 이름을 입력하세요. (별명이나 줄임말로도 검색 가능)', 
-                    required: false,
-                    autocomplete: true 
-                }]
+                description: '몬스터 목록을 열고 정보를 확인합니다.'
             }]
         });
     } catch (e) { console.error(e); }
 });
 
 client.on(Events.InteractionCreate, async interaction => {
-    if (interaction.isAutocomplete()) {
-        const focusedValue = interaction.options.getFocused();
-        const currentInput = normalize(focusedValue);
-        const options = monsterList
-            .filter(name => normalize(name).includes(currentInput) || (monsterAliases[name] && monsterAliases[name].some(a => normalize(a).includes(currentInput))))
-            .slice(0, 25).map(name => ({ name, value: name }));
-        await interaction.respond(options);
-        return;
-    }
-
-    if (interaction.isChatInputCommand()) {
-        if (interaction.commandName === '몬스터') {
-            if (isCooldownActive(interaction)) return;
-            const inputStr = interaction.options.getString('이름');
-            
-            if (!inputStr) {
-                const selectMenu = new StringSelectMenuBuilder()
-                    .setCustomId('monsterSelect')
-                    .setPlaceholder('🔍 확인하고 싶은 몬스터를 선택하세요')
-                    .addOptions(monsterList.map(name => ({ label: name, value: name })));
-
-                const row = new ActionRowBuilder().addComponents(selectMenu);
-                return interaction.reply({ 
-                    content: '📝 **찾으시는 몬스터를 아래 목록에서 선택해 주세요!**', 
-                    components: [row],
-                    ephemeral: true
-                });
-            }
-
-            const userInput = inputStr.trim();
-            const monsterName = resolveMonsterName(userInput);
-            const monsterData = getMonsterData(monsterName);
-            if (!monsterData) return interaction.reply({ content: `<:X_:1493987174750748812> 데이터 없음: \`${userInput}\``, ephemeral: true });
-            await sendPage(interaction, !monsterData.info && monsterData.hitzone ? "hitzone" : "basic", monsterName, monsterData, 0);
-        }
-    }
-
-    if (interaction.isStringSelectMenu() && interaction.customId === 'monsterSelect') {
-        const monsterName = interaction.values[0];
-        const monsterData = getMonsterData(monsterName);
-        if (!monsterData) return interaction.reply({ content: `<:X_:1493987174750748812> 데이터 없음: \`${monsterName}\``, ephemeral: true });
-        
-        await sendPage(interaction, !monsterData.info && monsterData.hitzone ? "hitzone" : "basic", monsterName, monsterData, 0);
+    if (interaction.isChatInputCommand() && interaction.commandName === '몬스터') {
+        if (isCooldownActive(interaction)) return;
+        return respondWithContainer(interaction, buildMonsterListContainer());
     }
 
     if (interaction.isButton()) {
@@ -215,12 +200,14 @@ client.on(Events.InteractionCreate, async interaction => {
         const monsterName = parts[1];
         // 탭 버튼을 눌렀을 때는 page 정보가 없으므로 0으로 초기화
         const page = parts.length > 2 ? parseInt(parts[2], 10) : 0;
-        
+
         if (action === 'dummy') return;
+        if (action === 'list') return respondWithContainer(interaction, buildMonsterListContainer());
 
         const monsterData = getMonsterData(monsterName);
-        if (!monsterData) return;
-        if (['dropLow', 'dropHigh'].includes(action)) await sendDropPage(interaction, action === 'dropHigh' ? 'drop_high' : 'drop_low', monsterName, monsterData, page);
+        if (!monsterData) return interaction.reply(buildNoticeMessage(`<:X_:1493987174750748812> 데이터 없음: \`${monsterName}\``));
+        if (action === 'pick') await sendPage(interaction, !monsterData.info && monsterData.hitzone ? "hitzone" : "basic", monsterName, monsterData, 0);
+        else if (['dropLow', 'dropHigh'].includes(action)) await sendDropPage(interaction, action === 'dropHigh' ? 'drop_high' : 'drop_low', monsterName, monsterData, page);
         else await sendPage(interaction, action, monsterName, monsterData, page);
     }
 });
@@ -278,28 +265,27 @@ async function sendPage(interaction, type, monsterName, monsterData, page = 0) {
         }
     }
 
-    const embeds = splitToEmbeds(monsterName, monsterData, description);
-    const totalPages = embeds.length;
+    const pages = splitToPages(description);
+    const totalPages = pages.length;
     if (page >= totalPages) page = totalPages - 1;
     if (page < 0) page = 0;
 
     // 탭 버튼(기존)과 페이지 버튼(신규)을 안전하게 결합
-    const components = [
+    const rows = [
         ...getPaginationRow(type, monsterName, page, totalPages),
         ...getTabButtons(type, monsterName, monsterData)
     ];
-    
-    if (interaction.isMessageComponent()) await interaction.update({ content: "", embeds: [embeds[page]], components });
-    else await interaction.reply({ embeds: [embeds[page]], components, ephemeral: true });
+
+    await respondWithContainer(interaction, buildMonsterPageContainer(monsterData, pages[page], rows));
 }
 
 // 소재 전용 페이지 역시 기존 마크다운 구축 로직 100% 복구
 async function sendDropPage(interaction, rankKey, monsterName, monsterData, page = 0) {
     const icon = monsterData.icon ? `${monsterData.icon} ` : "";
     const description = `# ${icon}${monsterName}\n\n${getArrayAsString(monsterData, rankKey)}`;
-    const embeds = splitToEmbeds(monsterName, monsterData, description);
-    
-    const totalPages = embeds.length;
+    const pages = splitToPages(description);
+
+    const totalPages = pages.length;
     if (page >= totalPages) page = totalPages - 1;
     if (page < 0) page = 0;
 
@@ -310,14 +296,13 @@ async function sendDropPage(interaction, rankKey, monsterName, monsterData, page
     
     const currentAction = rankKey === 'drop_high' ? 'dropHigh' : 'dropLow';
     
-    const components = [
+    const rows = [
         ...getPaginationRow(currentAction, monsterName, page, totalPages),
         rankRow,
         ...getTabButtons("drop", monsterName, monsterData)
     ];
-    
-    if (interaction.isMessageComponent()) await interaction.update({ content: "", embeds: [embeds[page]], components });
-    else await interaction.reply({ embeds: [embeds[page]], components, ephemeral: true });
+
+    await respondWithContainer(interaction, buildMonsterPageContainer(monsterData, pages[page], rows));
 }
 
 client.login(token);
