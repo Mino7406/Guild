@@ -4,16 +4,31 @@ const fs = require('fs');
 const path = require('path');
 
 const token = process.env.DISCORD_TOKEN;
-const { Agent } = require('undici');
+const { Agent, request } = require('undici');
 
 // 디스코드 API 연결을 60초까지 유지한다. 기본값(약 4초)이면 잠깐만 안 써도 연결이 끊겨서
-// 다음 버튼 클릭 때 TLS 연결을 새로 맺느라 느려진다 (이 서버에서 약 0.2초 차이).
+// 다음 버튼 클릭 때 TLS 연결을 새로 맺느라 느려진다 (이 서버 CPU에서 새 연결 하나에 약 0.3초).
+const restAgent = new Agent({ connect: { timeout: 30000 }, keepAliveTimeout: 60000, keepAliveMaxTimeout: 600000 });
 const client = new Client({
     intents: [GatewayIntentBits.Guilds],
     // 프로필에 "Monster Hunter Wilds 하는 중" 표시 (옵션에 두면 재접속할 때도 자동으로 다시 보낸다)
     presence: { status: 'online', activities: [{ name: 'Monster Hunter Wilds', type: ActivityType.Playing }] },
-    rest: { agent: new Agent({ connect: { timeout: 30000 }, keepAliveTimeout: 60000, keepAliveMaxTimeout: 600000 }) }
+    rest: { agent: restAgent }
 });
+
+// 아무도 버튼을 안 누르는 동안에도 연결이 끊기지 않게 25초마다 가벼운 요청을 보낸다.
+// (토큰이 필요 없는 /gateway 라 봇 요청 한도에 들어가지 않는다. 연결 2개를 살려 두는 건
+//  몬스터를 고를 때 요청 두 개를 동시에 보내기 때문)
+const WARM_INTERVAL_MS = 25 * 1000;
+function warmConnection() {
+    for (let i = 0; i < 2; i++) {
+        request('https://discord.com/api/v10/gateway', { dispatcher: restAgent })
+            .then(res => res.body.dump())
+            .catch(() => { /* 다음 차례에 다시 시도 */ });
+    }
+}
+setInterval(warmConnection, WARM_INTERVAL_MS).unref();
+warmConnection();
 
 // 응답이 느릴 때 원인을 볼 수 있도록 기록하는 기준 (디스코드 응답 제한은 3초)
 const SLOW_RESPONSE_MS = 1500;
@@ -142,17 +157,20 @@ async function respondWithContainer(interaction, container, mode = 'auto') {
 // 상호작용 응답(reply)으로 올리면 메시지 위에 "메시지를 보려면 클릭하세요" 답장 표시가 붙어서,
 // 봇이 채널에 일반 메시지로 직접 보낸다. 채널에 보낼 권한이 없을 때만 응답(followUp)으로 올린다.
 async function postPublicFromList(interaction, container) {
-    await interaction.deferUpdate(); // 3초 안에 먼저 응답
-    let message = null;
-    try {
-        message = await client.rest.post(Routes.channelMessages(interaction.channelId), {
+    // 응답 확인(3초 제한)과 채널 전송은 서로 기다릴 필요가 없어 동시에 보낸다
+    const [, sent] = await Promise.allSettled([
+        interaction.deferUpdate(),
+        client.rest.post(Routes.channelMessages(interaction.channelId), {
             body: { components: [container.toJSON()], flags: MessageFlags.IsComponentsV2 }
-        });
-    } catch (e) {
-        console.error('[채널 메시지 전송 실패 → 응답으로 올림]', e.code || '', e.message);
+        })
+    ]);
+    let message = sent.status === 'fulfilled' ? sent.value : null;
+    if (!message) {
+        console.error('[채널 메시지 전송 실패 → 응답으로 올림]', sent.reason?.code || '', sent.reason?.message);
         message = await interaction.followUp({ components: [container], flags: MessageFlags.IsComponentsV2 });
     }
-    await interaction.deleteReply().catch(e => { if (e.code !== 10008) console.error('[목록 닫기 실패]', e.code || '', e.message); });
+    // 목록 닫기는 기다리지 않는다 (화면에 보이는 응답은 이미 끝남)
+    interaction.deleteReply().catch(e => { if (e.code !== 10008) console.error('[목록 닫기 실패]', e.code || '', e.message); });
     return message;
 }
 
@@ -199,12 +217,20 @@ async function deletePublicPost(channelId, messageId, post) {
     }
 }
 
+// 몬스터 파일은 클릭할 때마다 읽지 않고 처음 한 번 읽어 메모리에 둔다
+// (파일이 바뀌면 배포 때 봇이 재시작되므로 다시 읽힌다)
+const monsterCache = new Map();
 function getMonsterData(monsterName) {
+    if (monsterCache.has(monsterName)) return monsterCache.get(monsterName);
+    if (!monsterList.includes(monsterName)) return null; // 버튼 ID로 폴더 밖 경로를 읽지 못하게
     try {
-        const filePath = path.join(__dirname, 'monsters', `${monsterName}.json`);
-        if (!fs.existsSync(filePath)) return null;
-        return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-    } catch (e) { return null; }
+        const data = JSON.parse(fs.readFileSync(path.join(MONSTER_DIR, `${monsterName}.json`), 'utf-8').replace(/^﻿/, ''));
+        monsterCache.set(monsterName, data);
+        return data;
+    } catch (e) {
+        console.error(`[몬스터 파일 오류] ${monsterName}:`, e.message);
+        return null;
+    }
 }
 
 // 서식지는 한 줄에 2곳까지만 놓는다 (3곳 이상을 한 줄에 쓰면 폭이 좁은 화면에서 줄이 넘어가며 글자가 잘린다)
