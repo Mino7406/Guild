@@ -172,8 +172,57 @@ async function postPublicFromList(interaction, container) {
 // 채널마다 봇이 올린 공개 몬스터 메시지를 기억해 두고, 새로 올릴 때
 //  · 같은 사람이 전에 올린 메시지(1인 1메시지)
 //  · 같은 몬스터를 보여 주는 메시지(중복 몬스터)
-// 를 지운다. 기록은 메모리에만 있어 봇이 재시작하면 그 전 메시지는 지우지 않는다.
-const publicPosts = new Map(); // channelId → Map(messageId → { userId, monsterName })
+// 를 지운다. 기록은 data/state.json 에 저장돼 봇이 재시작해도 이어진다.
+const publicPosts = new Map(); // channelId → Map(messageId → { userId, monsterName, token, at, clickedAt })
+const privateLists = new Map(); // userId → { applicationId, token, at } (아래 "나만 보는 목록" 참고)
+
+// ── 추적 기록 저장 ──
+// 재시작(배포 포함) 뒤에도 예전 공개 메시지·목록을 지울 수 있게 파일로 남긴다.
+// 응답 토큰은 15분만 쓸모 있으므로 지난 토큰은 저장할 때 빼서, 파일에 오래 남지 않게 한다.
+const STATE_FILE = path.join(__dirname, 'data', 'state.json');
+const POSTS_PER_CHANNEL = 100; // 손으로 지운 메시지 기록이 끝없이 쌓이지 않게
+
+function loadState() {
+    try {
+        const s = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
+        for (const [channelId, posts] of Object.entries(s.publicPosts || {})) publicPosts.set(channelId, new Map(Object.entries(posts)));
+        for (const [userId, list] of Object.entries(s.privateLists || {})) privateLists.set(userId, list);
+        console.log(`[기록 불러옴] 공개 메시지 ${[...publicPosts.values()].reduce((n, m) => n + m.size, 0)}개, 목록 ${privateLists.size}개`);
+    } catch (e) {
+        if (e.code !== 'ENOENT') console.error('[기록 불러오기 실패]', e.message);
+    }
+}
+
+function writeStateNow() {
+    const now = Date.now();
+    const fresh = v => (v.token && now - v.at >= INTERACTION_TOKEN_MS ? { ...v, token: undefined } : v);
+    const s = { publicPosts: {}, privateLists: {} };
+    for (const [channelId, posts] of publicPosts) {
+        if (!posts.size) continue;
+        s.publicPosts[channelId] = Object.fromEntries([...posts].slice(-POSTS_PER_CHANNEL).map(([id, p]) => [id, fresh(p)]));
+    }
+    for (const [userId, list] of privateLists) if (now - list.at < INTERACTION_TOKEN_MS) s.privateLists[userId] = list;
+    try {
+        fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
+        const tmp = STATE_FILE + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(s), { mode: 0o600 });
+        fs.renameSync(tmp, STATE_FILE); // 쓰다가 꺼져도 파일이 깨지지 않게
+    } catch (e) { console.error('[기록 저장 실패]', e.message); }
+}
+
+// 클릭이 몰려도 1초에 한 번만 쓴다
+let saveTimer = null;
+function saveState() {
+    if (saveTimer) return;
+    saveTimer = setTimeout(() => { saveTimer = null; writeStateNow(); }, 1000);
+}
+// 배포·재시작(systemd 정지 신호) 때 마지막 변경까지 저장하고 끈다
+for (const sig of ['SIGTERM', 'SIGINT']) {
+    process.once(sig, () => {
+        if (saveTimer) { clearTimeout(saveTimer); writeStateNow(); }
+        process.exit(0);
+    });
+}
 
 async function replacePublicPosts(interaction, message, monsterName) {
     const channelId = interaction.channelId;
@@ -189,11 +238,10 @@ async function replacePublicPosts(interaction, message, monsterName) {
         return deletePublicPost(channelId, message.id, mine);
     }
     posts.set(message.id, mine);
-    if (posts.size > 100) posts.delete(posts.keys().next().value); // 손으로 지운 메시지 기록이 끝없이 쌓이지 않게
-    for (const [id, p] of stale) {
-        posts.delete(id);
-        await deletePublicPost(channelId, id, p);
-    }
+    if (posts.size > POSTS_PER_CHANNEL) posts.delete(posts.keys().next().value);
+    for (const [id] of stale) posts.delete(id);
+    saveState();
+    for (const [id, p] of stale) await deletePublicPost(channelId, id, p);
 }
 
 const INTERACTION_TOKEN_MS = 14 * 60 * 1000; // 응답 토큰은 15분 유효
@@ -310,7 +358,7 @@ function splitToPages(fullDescription) {
 
 // 한 화면에 다 들어오도록 칸 개수로 페이지를 나눈다
 const BASIC_BLOCKS_PER_PAGE = 3; // 기본 정보: 소개 · 서식지 · 위험도 / 절단·파괴 부위 · 약점 · 추천 속성
-const DROP_ITEMS_PER_PAGE = 5;   // 소재: 한 페이지에 소재 5개
+const DROP_ITEMS_PER_PAGE = 4;   // 소재: 한 페이지에 소재 4개
 const HITZONE_PARTS_PER_PAGE = 4; // 육질: 한 페이지에 부위 4개
 
 // 빈 줄로 나뉜 덩어리(소재 하나 = 덩어리 하나)로 자른다
@@ -388,10 +436,11 @@ process.on('unhandledRejection', e => console.error('[처리되지 않은 오류
 // 나만 보는 메시지는 그 메시지를 만든(또는 그 메시지에서 버튼을 눌러 화면을 바꾼) 상호작용의 토큰으로만
 // 지울 수 있고, 토큰은 15분 동안만 유효하다. 그래서 사람마다 마지막 목록의 토큰을 기억해 두고,
 // 새 목록을 띄우면 예전 목록을 지운다. 15분이 지난 목록은 지울 수 없어 그대로 남는다.
-const privateLists = new Map(); // userId → { applicationId, token, at }
+// (privateLists 는 위 "추적 기록 저장"과 함께 선언)
 
 function rememberPrivateList(interaction) {
     privateLists.set(interaction.user.id, { applicationId: interaction.applicationId, token: interaction.token, at: Date.now() });
+    saveState();
 }
 
 async function openPrivateList(interaction, page, mode) {
@@ -447,6 +496,7 @@ async function handleInteraction(interaction) {
         if (action === 'pick') {
             const message = await sendPage(interaction, !monsterData.info && monsterData.hitzone ? "hitzone" : "basic", monsterName, monsterData, 0, 'public');
             privateLists.delete(interaction.user.id); // 고른 목록은 위에서 닫혔다
+            saveState();
             await replacePublicPosts(interaction, message, monsterName);
             return;
         }
@@ -553,4 +603,5 @@ async function sendDropPage(interaction, rankKey, monsterName, monsterData, page
     await respondWithContainer(interaction, buildMonsterPageContainer(monsterData, pages[page], rows));
 }
 
+loadState(); // 재시작 전에 올린 공개 메시지·목록 기록 불러오기
 client.login(token);
