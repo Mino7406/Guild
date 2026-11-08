@@ -35,7 +35,8 @@ const monsterEmojis = {
     "라기아크루스": { name: "Lagiacrus", id: "1568858273833029703" },
     "셀레기오스": { name: "Seregios", id: "1568858288202846298" },
     "오메가 플라네테스": { name: "Omega_Planetes", id: "1568858280019623936" },
-    "고그마지오스": { name: "Gogmazios", id: "1568858267713675344" }
+    "고그마지오스": { name: "Gogmazios", id: "1568858267713675344" },
+    "고양이 훈련 통 펀처": { name: "Training", id: "1568872622089838592" }
 };
 
 function monsterIconText(monsterName, monsterData) {
