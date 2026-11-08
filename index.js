@@ -4,7 +4,17 @@ const fs = require('fs');
 const path = require('path');
 
 const token = process.env.DISCORD_TOKEN;
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const { Agent } = require('undici');
+
+// 디스코드 API 연결을 60초까지 유지한다. 기본값(약 4초)이면 잠깐만 안 써도 연결이 끊겨서
+// 다음 버튼 클릭 때 TLS 연결을 새로 맺느라 느려진다 (이 서버에서 약 0.2초 차이).
+const client = new Client({
+    intents: [GatewayIntentBits.Guilds],
+    rest: { agent: new Agent({ connect: { timeout: 30000 }, keepAliveTimeout: 60000, keepAliveMaxTimeout: 600000 }) }
+});
+
+// 응답이 느릴 때 원인을 볼 수 있도록 기록하는 기준 (디스코드 응답 제한은 3초)
+const SLOW_RESPONSE_MS = 1500;
 
 const monsterList = [
     "레 다우", "우드 투나", "누 이그드라", "진 다하드", "리오레우스", "조 시아", "알슈베르도", "고어 마가라",
@@ -191,10 +201,18 @@ client.once(Events.ClientReady, async c => {
 
 // 응답 하나가 실패해도(예: 3초 초과로 Unknown interaction) 봇 전체가 꺼지지 않도록 여기서 잡는다
 client.on(Events.InteractionCreate, async interaction => {
+    const label = interaction.customId || interaction.commandName || interaction.type;
+    const receivedDelay = Date.now() - interaction.createdTimestamp; // 디스코드 → 봇 도착까지 (서버 시계 오차 포함)
+    const start = Date.now();
     try {
         await handleInteraction(interaction);
     } catch (e) {
-        console.error(`[상호작용 오류] ${interaction.customId || interaction.commandName || interaction.type}:`, e.code || '', e.message);
+        console.error(`[상호작용 오류] ${label}: 도착 ${receivedDelay}ms, 처리 ${Date.now() - start}ms,`, e.code || '', e.message);
+        return;
+    }
+    const handled = Date.now() - start;
+    if (receivedDelay + handled > SLOW_RESPONSE_MS) {
+        console.warn(`[느린 응답] ${label}: 도착 ${receivedDelay}ms + 처리 ${handled}ms (웹소켓 핑 ${client.ws.ping}ms)`);
     }
 });
 
