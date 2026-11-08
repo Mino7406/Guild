@@ -117,10 +117,52 @@ function buildMonsterListContainer(page = 0) {
 
 // 버튼을 누르면 같은 메시지를 새 화면으로 갱신하고, 슬래시 명령이면 새 메시지로 보낸다.
 // 봇 업데이트 전에 보낸 옛 임베드 메시지의 버튼은 V2로 바꿀 수 없으므로 새 메시지로 띄운다.
-async function respondWithContainer(interaction, container) {
-    const canUpdate = interaction.isMessageComponent() && interaction.message.flags.has(MessageFlags.IsComponentsV2);
+// mode: 'auto'(기본, 위 규칙) · 'public'(채널에 모두가 보는 새 메시지) · 'private'(나만 보는 새 메시지)
+async function respondWithContainer(interaction, container, mode = 'auto') {
+    if (mode === 'public') {
+        const res = await interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2, withResponse: true });
+        return res?.resource?.message ?? null;
+    }
+    const canUpdate = mode === 'auto' && interaction.isMessageComponent() && interaction.message.flags.has(MessageFlags.IsComponentsV2);
     if (canUpdate) await interaction.update({ components: [container], flags: MessageFlags.IsComponentsV2 });
     else await interaction.reply({ components: [container], flags: V2_EPHEMERAL });
+    return null;
+}
+
+// ── 도배 방지 ──
+// 채널마다 봇이 올린 공개 몬스터 메시지를 기억해 두고, 새로 올릴 때
+//  · 같은 사람이 전에 올린 메시지(1인 1메시지)
+//  · 같은 몬스터를 보여 주는 메시지(중복 몬스터)
+// 를 지운다. 기록은 메모리에만 있어 봇이 재시작하면 그 전 메시지는 지우지 않는다.
+const publicPosts = new Map(); // channelId → Map(messageId → { userId, monsterName })
+
+async function replacePublicPosts(interaction, message, monsterName) {
+    const channelId = interaction.channelId;
+    if (!channelId || !message) return;
+    if (!publicPosts.has(channelId)) publicPosts.set(channelId, new Map());
+    const posts = publicPosts.get(channelId);
+    const stale = [...posts].filter(([id, p]) => id !== message.id && (p.userId === interaction.user.id || p.monsterName === monsterName));
+    posts.set(message.id, { userId: interaction.user.id, monsterName, token: interaction.token, at: Date.now() });
+    if (posts.size > 100) posts.delete(posts.keys().next().value); // 손으로 지운 메시지 기록이 끝없이 쌓이지 않게
+    for (const [id, p] of stale) {
+        posts.delete(id);
+        await deletePublicPost(channelId, id, p);
+    }
+}
+
+const INTERACTION_TOKEN_MS = 14 * 60 * 1000; // 응답 토큰은 15분 유효
+async function deletePublicPost(channelId, messageId, post) {
+    try {
+        await client.rest.delete(Routes.channelMessage(channelId, messageId));
+    } catch (e) {
+        if (e.code === 10008) return; // 이미 지워짐
+        // 채널 권한이 없으면 응답 토큰으로 지운다(올린 지 15분 안일 때만)
+        if (post.token && Date.now() - post.at < INTERACTION_TOKEN_MS) {
+            try { return await client.rest.delete(Routes.webhookMessage(client.application.id, post.token, messageId)); }
+            catch (e2) { if (e2.code === 10008) return; e = e2; }
+        }
+        console.error('[이전 몬스터 메시지 삭제 실패]', e.code || '', e.message);
+    }
 }
 
 function getMonsterData(monsterName) {
@@ -271,20 +313,30 @@ async function handleInteraction(interaction) {
         const page = parts.length > 2 ? parseInt(parts[2], 10) : 0;
 
         if (action === 'dummy') return;
-        // 목록으로 돌아가면 보던 몬스터가 있는 페이지를 연다 (예전 메시지의 'list' 버튼은 첫 페이지)
-        if (action === 'list') return respondWithContainer(interaction, buildMonsterListContainer(monsterName ? listPageOf(monsterName) : 0));
+        // 목록으로 돌아가면 보던 몬스터가 있는 페이지를 연다 (예전 메시지의 'list' 버튼은 첫 페이지).
+        // 모두가 보는 몬스터 메시지에서 누르면 그 메시지는 그대로 두고, 누른 사람에게만 목록을 따로 띄운다.
+        if (action === 'list') {
+            const isPublicPost = !interaction.message.flags.has(MessageFlags.Ephemeral);
+            return respondWithContainer(interaction, buildMonsterListContainer(monsterName ? listPageOf(monsterName) : 0), isPublicPost ? 'private' : 'auto');
+        }
         if (action === 'listpage') return respondWithContainer(interaction, buildMonsterListContainer(parseInt(monsterName, 10)));
 
         const monsterData = getMonsterData(monsterName);
         if (!monsterData) return interaction.reply(buildNoticeMessage(`<:X_:1493987174750748812> 데이터 없음: \`${monsterName}\``));
-        if (action === 'pick') await sendPage(interaction, !monsterData.info && monsterData.hitzone ? "hitzone" : "basic", monsterName, monsterData, 0);
+        // 몬스터를 고르면 채널에 모두가 보는 메시지로 올린다 (나만 보는 목록은 그대로 남아 다른 몬스터도 고를 수 있음).
+        // 응답을 먼저 보내고(3초 제한) 그다음 이전 메시지를 지운다.
+        if (action === 'pick') {
+            const message = await sendPage(interaction, !monsterData.info && monsterData.hitzone ? "hitzone" : "basic", monsterName, monsterData, 0, 'public');
+            await replacePublicPosts(interaction, message, monsterName);
+            return;
+        }
         else if (['dropLow', 'dropHigh'].includes(action)) await sendDropPage(interaction, action === 'dropHigh' ? 'drop_high' : 'drop_low', monsterName, monsterData, page);
         else await sendPage(interaction, action, monsterName, monsterData, page);
     }
 }
 
 // 기존 마크다운 구축 로직 100% 복구
-async function sendPage(interaction, type, monsterName, monsterData, page = 0) {
+async function sendPage(interaction, type, monsterName, monsterData, page = 0, mode = 'auto') {
     const icon = monsterIconText(monsterName, monsterData);
     let description = `# ${icon}${monsterName}\n`;
 
@@ -347,7 +399,7 @@ async function sendPage(interaction, type, monsterName, monsterData, page = 0) {
         ...getTabButtons(type, monsterName, monsterData)
     ];
 
-    await respondWithContainer(interaction, buildMonsterPageContainer(monsterData, pages[page], rows));
+    return respondWithContainer(interaction, buildMonsterPageContainer(monsterData, pages[page], rows), mode);
 }
 
 // 소재 전용 페이지 역시 기존 마크다운 구축 로직 100% 복구
