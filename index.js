@@ -271,6 +271,26 @@ function splitToPages(fullDescription) {
     return pages;
 }
 
+// 한 화면에 다 들어오도록 칸 개수로 페이지를 나눈다
+const BASIC_BLOCKS_PER_PAGE = 3; // 기본 정보: 소개 · 서식지 · 위험도 / 절단·파괴 부위 · 약점 · 추천 속성
+const DROP_ITEMS_PER_PAGE = 5;   // 소재: 한 페이지에 소재 5개
+
+// 빈 줄로 나뉜 덩어리(소재 하나 = 덩어리 하나)로 자른다
+function splitIntoBlocks(text) {
+    return text.split(/\n[ \t]*\n/).map(s => s.trim()).filter(Boolean);
+}
+
+function pagesFromBlocks(header, blocks, perPage) {
+    if (!blocks.length) return [header];
+    const pages = [];
+    for (let i = 0; i < blocks.length; i += perPage) {
+        const page = `${header}\n${blocks.slice(i, i + perPage).join('\n\n')}`;
+        // 칸이 유난히 길면 글자 수 한도에 걸리지 않게 예전 방식으로 한 번 더 나눈다
+        pages.push(...(page.length > 3500 ? splitToPages(page) : [page]));
+    }
+    return pages;
+}
+
 // 기존에 작성하셨던 탭 버튼 로직 100% 원상복구 (버튼 ID 왜곡 방지)
 function getTabButtons(currentTab, monsterName, monsterData) {
     const row = new ActionRowBuilder();
@@ -395,19 +415,20 @@ async function sendPage(interaction, type, monsterName, monsterData, page = 0, m
     const icon = monsterIconText(monsterName, monsterData);
     let description = `# ${icon}${monsterName}\n`;
 
+    let blocks = null; // 칸 단위로 나눌 화면(기본 정보·소재)은 여기에 칸을 모으고, 한 페이지에 정해진 개수만 보여 준다
     if (type === "basic") {
-        if (monsterData.species) description += `**【 ${monsterData.species} 】**\n\n`;
-        description += `${getArrayAsString(monsterData, "info")}\n\n`;
-        if (monsterData.habitat) description += `**《 서식지 》**\n${habitatLines(monsterData.habitat)}\n\n`;
-        if (monsterData.threat_level) description += `**《 위험도 》**\n> ${monsterData.threat_level}\n\n`;
+        blocks = [];
+        blocks.push(`${monsterData.species ? `**【 ${monsterData.species} 】**\n\n` : ''}${getArrayAsString(monsterData, "info")}`);
+        if (monsterData.habitat) blocks.push(`**《 서식지 》**\n${habitatLines(monsterData.habitat)}`);
+        if (monsterData.threat_level) blocks.push(`**《 위험도 》**\n> ${monsterData.threat_level}`);
         [['breakable_parts', '절단/파괴 가능 부위'], ['weak_point', '약점'], ['element_weakness', '추천 속성']].forEach(([k, t]) => {
-            if (monsterData[k]) description += `**《 ${t} 》**\n${monsterData[k].map(el => `> ${el.trim()}`).join("\n")}\n\n`;
+            if (monsterData[k]) blocks.push(`**《 ${t} 》**\n${monsterData[k].map(el => `> ${el.trim()}`).join("\n")}`);
         });
     } else if (type === "hitzone") {
         description += getArrayAsString(monsterData, "hitzone");
     } else if (type === "drop") {
         if (monsterData.drop_low) return sendDropPage(interaction, 'drop_low', monsterName, monsterData, page);
-        description += getArrayAsString(monsterData, "drop");
+        blocks = splitIntoBlocks(getArrayAsString(monsterData, "drop"));
     } else if (type === "status") {
         if (monsterData.status) {
             const groups = { s3: [], s2: [], s1: [], s0: [] };
@@ -443,7 +464,9 @@ async function sendPage(interaction, type, monsterName, monsterData, page = 0, m
         }
     }
 
-    const pages = splitToPages(description);
+    const pages = blocks
+        ? pagesFromBlocks(description, blocks, type === "basic" ? BASIC_BLOCKS_PER_PAGE : DROP_ITEMS_PER_PAGE)
+        : splitToPages(description);
     const totalPages = pages.length;
     if (page >= totalPages) page = totalPages - 1;
     if (page < 0) page = 0;
@@ -460,8 +483,7 @@ async function sendPage(interaction, type, monsterName, monsterData, page = 0, m
 // 소재 전용 페이지 역시 기존 마크다운 구축 로직 100% 복구
 async function sendDropPage(interaction, rankKey, monsterName, monsterData, page = 0) {
     const icon = monsterIconText(monsterName, monsterData);
-    const description = `# ${icon}${monsterName}\n\n${getArrayAsString(monsterData, rankKey)}`;
-    const pages = splitToPages(description);
+    const pages = pagesFromBlocks(`# ${icon}${monsterName}\n`, splitIntoBlocks(getArrayAsString(monsterData, rankKey)), DROP_ITEMS_PER_PAGE);
 
     const totalPages = pages.length;
     if (page >= totalPages) page = totalPages - 1;
