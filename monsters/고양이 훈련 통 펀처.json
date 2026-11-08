@@ -1,6 +1,7 @@
 {
+  "emoji": { "name": "Training", "id": "1568872622089838592" },
   "color": "#E67E22",
-  "thumbnail": "https://media.discordapp.net/attachments/1492342873423609876/1493476725286371338/MHWilds-Training_Area_Icon.png?ex=69df1c16&is=69ddca96&hm=633c9e3a1bfc3df6b2b5083907fb8abba5455d6e7a3b1ab557c403b2a510f741&=&format=webp&quality=lossless&width=80&height=80",
+  "thumbnail": "https://cdn.discordapp.com/emojis/1568872622089838592.png?size=128",
   "hitzone": [
     "**머리**",
     "> <:S_:1492102603239325866> `40` | <:H_:1492102606514946239> `40` | <:A_:1492102604648616077> `40` ",

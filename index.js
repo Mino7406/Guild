@@ -16,28 +16,23 @@ const client = new Client({
 // 응답이 느릴 때 원인을 볼 수 있도록 기록하는 기준 (디스코드 응답 제한은 3초)
 const SLOW_RESPONSE_MS = 1500;
 
-const monsterList = [
-    "레 다우", "우드 투나", "누 이그드라", "진 다하드", "리오레우스", "조 시아", "알슈베르도", "고어 마가라",
-    "타마미츠네", "라기아크루스", "셀레기오스", "오메가 플라네테스", "고그마지오스", "고양이 훈련 통 펀처"
-];
+// monsters 폴더의 JSON 파일 하나 = 몬스터 하나. 목록은 가나다순, 훈련 통 펀처만 맨 끝.
+// 몬스터를 추가할 때는 JSON 파일만 넣으면 된다 (아이콘은 파일 안 "emoji": { name, id }).
+const MONSTER_DIR = path.join(__dirname, 'monsters');
+const LAST_IN_LIST = "고양이 훈련 통 펀처";
+const monsterList = fs.readdirSync(MONSTER_DIR)
+    .filter(f => f.endsWith('.json'))
+    .map(f => f.slice(0, -5))
+    .sort((a, b) => (a === LAST_IN_LIST) - (b === LAST_IN_LIST) || a.localeCompare(b, 'ko'));
 
 // 몬스터 아이콘 (봇 애플리케이션 이모지) — 목록 버튼과 정보 화면 제목에 표시
-const monsterEmojis = {
-    "레 다우": { name: "Rey_Dau", id: "1568858285669359827" },
-    "우드 투나": { name: "Uth_Duna", id: "1568858291180802219" },
-    "누 이그드라": { name: "Nu_Udra", id: "1568858278287380601" },
-    "진 다하드": { name: "Jin_Dahaad", id: "1568858271593398382" },
-    "리오레우스": { name: "Rathalos", id: "1568858282905440328" },
-    "조 시아": { name: "Zoh_Shia", id: "1568858293206777926" },
-    "알슈베르도": { name: "Arkveld", id: "1568858263976550531" },
-    "고어 마가라": { name: "Gore_Magala", id: "1568858269773209720" },
-    "타마미츠네": { name: "Mizutsune", id: "1568858276508999720" },
-    "라기아크루스": { name: "Lagiacrus", id: "1568858273833029703" },
-    "셀레기오스": { name: "Seregios", id: "1568858288202846298" },
-    "오메가 플라네테스": { name: "Omega_Planetes", id: "1568858280019623936" },
-    "고그마지오스": { name: "Gogmazios", id: "1568858267713675344" },
-    "고양이 훈련 통 펀처": { name: "Training", id: "1568872622089838592" }
-};
+const monsterEmojis = {};
+for (const name of monsterList) {
+    try {
+        const emoji = JSON.parse(fs.readFileSync(path.join(MONSTER_DIR, `${name}.json`), 'utf-8')).emoji;
+        if (emoji && emoji.id) monsterEmojis[name] = { name: emoji.name, id: emoji.id };
+    } catch (e) { console.error(`[몬스터 파일 오류] ${name}:`, e.message); }
+}
 
 function monsterIconText(monsterName, monsterData) {
     if (monsterData.icon) return `${monsterData.icon} `;
@@ -78,9 +73,15 @@ function buildNoticeMessage(text) {
 
 // /몬스터 목록: Components V2 컨테이너 안에 몬스터 버튼을 한 줄에 3개씩 배치
 // (아이콘이 붙은 버튼은 한 줄에 4~5개면 디스코드 창 폭에 따라 줄이 넘어가 들쭉날쭉해진다)
+// 메시지 하나에 컴포넌트가 40개까지라 한 페이지에 21마리(7줄)씩 나눈다.
 const MONSTER_BUTTONS_PER_ROW = 3;
+const MONSTERS_PER_LIST_PAGE = 21;
+const listPageCount = () => Math.max(1, Math.ceil(monsterList.length / MONSTERS_PER_LIST_PAGE));
+const listPageOf = monsterName => Math.max(0, Math.floor(monsterList.indexOf(monsterName) / MONSTERS_PER_LIST_PAGE));
 
-function buildMonsterListContainer() {
+function buildMonsterListContainer(page = 0) {
+    const totalPages = listPageCount();
+    page = Math.min(Math.max(Number.isInteger(page) ? page : 0, 0), totalPages - 1);
     const container = new ContainerBuilder()
         .setAccentColor(DEFAULT_ACCENT)
         .addTextDisplayComponents(
@@ -90,15 +91,25 @@ function buildMonsterListContainer() {
             new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
         );
 
-    for (let i = 0; i < monsterList.length; i += MONSTER_BUTTONS_PER_ROW) {
+    const names = monsterList.slice(page * MONSTERS_PER_LIST_PAGE, (page + 1) * MONSTERS_PER_LIST_PAGE);
+    for (let i = 0; i < names.length; i += MONSTER_BUTTONS_PER_ROW) {
         const row = new ActionRowBuilder().addComponents(
-            monsterList.slice(i, i + MONSTER_BUTTONS_PER_ROW).map(name => {
+            names.slice(i, i + MONSTER_BUTTONS_PER_ROW).map(name => {
                 const button = new ButtonBuilder().setCustomId(`pick_${name}`).setLabel(name).setStyle(ButtonStyle.Secondary);
                 if (monsterEmojis[name]) button.setEmoji(monsterEmojis[name]);
                 return button;
             })
         );
         container.addActionRowComponents(row);
+    }
+
+    if (totalPages > 1) {
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+        container.addActionRowComponents(new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`listpage_${page - 1}`).setLabel("◀ 이전").setStyle(ButtonStyle.Primary).setDisabled(page === 0),
+            new ButtonBuilder().setCustomId(`dummy_listpage`).setLabel(`${page + 1} / ${totalPages}`).setStyle(ButtonStyle.Secondary).setDisabled(true),
+            new ButtonBuilder().setCustomId(`listpage_${page + 1}`).setLabel("다음 ▶").setStyle(ButtonStyle.Primary).setDisabled(page === totalPages - 1)
+        ));
     }
 
     return container;
@@ -194,7 +205,7 @@ function splitToPages(fullDescription) {
 // 기존에 작성하셨던 탭 버튼 로직 100% 원상복구 (버튼 ID 왜곡 방지)
 function getTabButtons(currentTab, monsterName, monsterData) {
     const row = new ActionRowBuilder();
-    row.addComponents(new ButtonBuilder().setCustomId('list').setLabel("목록").setEmoji("📋").setStyle(ButtonStyle.Secondary));
+    row.addComponents(new ButtonBuilder().setCustomId(`list_${monsterName}`).setLabel("목록").setEmoji("📋").setStyle(ButtonStyle.Secondary));
     if (currentTab !== "basic" && monsterData.info) row.addComponents(new ButtonBuilder().setCustomId(`basic_${monsterName}`).setLabel("기본 정보").setEmoji("1492145251941482697").setStyle(ButtonStyle.Secondary));
     if (currentTab !== "hitzone" && monsterData.hitzone) row.addComponents(new ButtonBuilder().setCustomId(`hitzone_${monsterName}`).setLabel("육질 정보").setEmoji("1492145248795758602").setStyle(ButtonStyle.Primary));
     if (currentTab !== "drop" && (monsterData.drop || monsterData.drop_low || monsterData.drop_high)) row.addComponents(new ButtonBuilder().setCustomId(`drop_${monsterName}`).setLabel("소재 정보").setEmoji("1492145247327617185").setStyle(ButtonStyle.Success));
@@ -260,7 +271,9 @@ async function handleInteraction(interaction) {
         const page = parts.length > 2 ? parseInt(parts[2], 10) : 0;
 
         if (action === 'dummy') return;
-        if (action === 'list') return respondWithContainer(interaction, buildMonsterListContainer());
+        // 목록으로 돌아가면 보던 몬스터가 있는 페이지를 연다 (예전 메시지의 'list' 버튼은 첫 페이지)
+        if (action === 'list') return respondWithContainer(interaction, buildMonsterListContainer(monsterName ? listPageOf(monsterName) : 0));
+        if (action === 'listpage') return respondWithContainer(interaction, buildMonsterListContainer(parseInt(monsterName, 10)));
 
         const monsterData = getMonsterData(monsterName);
         if (!monsterData) return interaction.reply(buildNoticeMessage(`<:X_:1493987174750748812> 데이터 없음: \`${monsterName}\``));

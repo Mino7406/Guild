@@ -1,6 +1,7 @@
 {
+  "emoji": { "name": "Lagiacrus", "id": "1568858273833029703" },
     "color": "#17d1f6",
-    "thumbnail": "https://media.discordapp.net/attachments/1492342873423609876/1493141457890967612/E0iCAmmkzGy9Dafu7Q_zUklZAsr-ow4-O4K8B0SBBtlQZ81-MS4hPTra-NOjVqtftDEOB46hmPcejwA6nmzehWsSXL1M5R5I7NpmekazIW5EEp5Zv_BJbBH8POiD9C48mLAEO2J721xCtKLHVbvckQ.png?ex=69de8c98&is=69dd3b18&hm=ae990cd3c2f744f030b22b0fda87fa0a8b540bdbd5d742ab5d532cd434401597&=&format=webp&quality=lossless&width=205&height=205",
+    "thumbnail": "https://cdn.discordapp.com/emojis/1568858273833029703.png?size=128",
     "species": "해룡종",
     "threat_level": "**<:Rank_4:1492424261032214589>6　<:Rank:1492345611826102344>8　<:Rank:1492345611826102344>9**",
     "habitat": "**<:Map_2:1492095401342271662> 주홍빛 숲**",

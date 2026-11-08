@@ -1,6 +1,7 @@
 {
+  "emoji": { "name": "Mizutsune", "id": "1568858276508999720" },
     "color": "#fb9cb8",
-    "thumbnail": "https://media.discordapp.net/attachments/1492342873423609876/1493141403151106138/9FpsGXMG8At-95XGnqkXXT0kfA6LOR4TlKJUsxWU9nyn5VqitBNN-e76PFyBNnrRxdbs7L4nqIUX-4blAGhuFJP2dHZwl3P0kBJxPalDZFYUr3cbKwNK3UbaxvvDar1chEgbb69BqRo5dUQkubLZ0A.png?ex=69de8c8b&is=69dd3b0b&hm=f8d2499d29a0595e901f6f311f7a06ef8c55d3ff0626f7a3d25d55f86226322e&=&format=webp&quality=lossless&width=205&height=205",
+    "thumbnail": "https://cdn.discordapp.com/emojis/1568858276508999720.png?size=128",
     "species": "해룡종",
     "threat_level": "**<:Rank_4:1492424261032214589>5　<:Rank:1492345611826102344>8　<:Rank:1492345611826102344>9**",
     "habitat": "**<:Map_2:1492095401342271662> 주홍빛 숲　<:Map_5:1492095404492329100> 용도의 폐허**",
