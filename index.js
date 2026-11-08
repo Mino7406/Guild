@@ -129,14 +129,29 @@ function buildMonsterListContainer(page = 0) {
 // 봇 업데이트 전에 보낸 옛 임베드 메시지의 버튼은 V2로 바꿀 수 없으므로 새 메시지로 띄운다.
 // mode: 'auto'(기본, 위 규칙) · 'public'(채널에 모두가 보는 새 메시지) · 'private'(나만 보는 새 메시지)
 async function respondWithContainer(interaction, container, mode = 'auto') {
-    if (mode === 'public') {
-        const res = await interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2, withResponse: true });
-        return res?.resource?.message ?? null;
-    }
+    if (mode === 'public') return postPublicFromList(interaction, container);
     const canUpdate = mode === 'auto' && interaction.isMessageComponent() && interaction.message.flags.has(MessageFlags.IsComponentsV2);
     if (canUpdate) await interaction.update({ components: [container], flags: MessageFlags.IsComponentsV2 });
     else await interaction.reply({ components: [container], flags: V2_EPHEMERAL });
     return null;
+}
+
+// 나만 보는 목록에서 몬스터를 골랐을 때: 목록을 닫고 채널에 모두가 보는 메시지를 올린다.
+// 상호작용 응답(reply)으로 올리면 메시지 위에 "메시지를 보려면 클릭하세요" 답장 표시가 붙어서,
+// 봇이 채널에 일반 메시지로 직접 보낸다. 채널에 보낼 권한이 없을 때만 응답(followUp)으로 올린다.
+async function postPublicFromList(interaction, container) {
+    await interaction.deferUpdate(); // 3초 안에 먼저 응답
+    let message = null;
+    try {
+        message = await client.rest.post(Routes.channelMessages(interaction.channelId), {
+            body: { components: [container.toJSON()], flags: MessageFlags.IsComponentsV2 }
+        });
+    } catch (e) {
+        console.error('[채널 메시지 전송 실패 → 응답으로 올림]', e.code || '', e.message);
+        message = await interaction.followUp({ components: [container], flags: MessageFlags.IsComponentsV2 });
+    }
+    await interaction.deleteReply().catch(e => { if (e.code !== 10008) console.error('[목록 닫기 실패]', e.code || '', e.message); });
+    return message;
 }
 
 // ── 도배 방지 ──
@@ -361,11 +376,16 @@ async function openPrivateList(interaction, page, mode) {
     const old = privateLists.get(interaction.user.id);
     await respondWithContainer(interaction, buildMonsterListContainer(page), mode);
     rememberPrivateList(interaction);
-    if (!old || Date.now() - old.at >= INTERACTION_TOKEN_MS) return;
+    await deletePrivateList(old);
+}
+
+// 기억해 둔 목록을 닫는다 (토큰이 15분 지났으면 지울 수 없어 그냥 둔다)
+async function deletePrivateList(list) {
+    if (!list || Date.now() - list.at >= INTERACTION_TOKEN_MS) return;
     try {
-        await client.rest.delete(Routes.webhookMessage(old.applicationId, old.token, '@original'));
+        await client.rest.delete(Routes.webhookMessage(list.applicationId, list.token, '@original'));
     } catch (e) {
-        if (e.code !== 10008) console.error('[이전 목록 삭제 실패]', e.code || '', e.message); // 10008: 이미 닫힘
+        if (e.code !== 10008) console.error('[목록 닫기 실패]', e.code || '', e.message); // 10008: 이미 닫힘
     }
 }
 
@@ -399,10 +419,12 @@ async function handleInteraction(interaction) {
 
         const monsterData = getMonsterData(monsterName);
         if (!monsterData) return interaction.reply(buildNoticeMessage(`<:X_:1493987174750748812> 데이터 없음: \`${monsterName}\``));
-        // 몬스터를 고르면 채널에 모두가 보는 메시지로 올린다 (나만 보는 목록은 그대로 남아 다른 몬스터도 고를 수 있음).
-        // 응답을 먼저 보내고(3초 제한) 그다음 이전 메시지를 지운다.
+        // 몬스터를 고르면 채널에 모두가 보는 메시지로 올리고, 고른 나만 보는 목록은 닫는다
+        // (다시 고르려면 공개 메시지의 "목록" 버튼으로 새 목록을 연다).
+        // 응답을 먼저 보내고(3초 제한) 그다음 목록과 이전 메시지를 지운다.
         if (action === 'pick') {
             const message = await sendPage(interaction, !monsterData.info && monsterData.hitzone ? "hitzone" : "basic", monsterName, monsterData, 0, 'public');
+            privateLists.delete(interaction.user.id); // 고른 목록은 위에서 닫혔다
             await replacePublicPosts(interaction, message, monsterName);
             return;
         }
