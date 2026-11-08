@@ -319,7 +319,7 @@ function splitToPages(fullDescription) {
 // 한 화면에 다 들어오도록 칸 개수로 페이지를 나눈다
 const BASIC_BLOCKS_PER_PAGE = 3; // 기본 정보: 소개 · 서식지 · 위험도 / 절단·파괴 부위 · 약점 · 추천 속성
 const DROP_ITEMS_PER_PAGE = 5;   // 소재: 한 페이지에 소재 5개
-const HITZONE_PARTS_PER_PAGE = 5; // 육질: 한 페이지에 부위 5개
+const HITZONE_PARTS_PER_PAGE = 4; // 육질: 한 페이지에 부위 4개
 
 // 빈 줄로 나뉜 덩어리(소재 하나 = 덩어리 하나)로 자른다
 function splitIntoBlocks(text) {
