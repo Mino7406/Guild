@@ -16,14 +16,24 @@ const client = new Client({
 // 응답이 느릴 때 원인을 볼 수 있도록 기록하는 기준 (디스코드 응답 제한은 3초)
 const SLOW_RESPONSE_MS = 1500;
 
-// monsters 폴더의 JSON 파일 하나 = 몬스터 하나. 목록은 가나다순, 훈련 통 펀처만 맨 끝.
-// 몬스터를 추가할 때는 JSON 파일만 넣으면 된다 (아이콘은 파일 안 "emoji": { name, id }).
+// monsters 폴더의 JSON 파일 하나 = 몬스터 하나. 목록 순서는 게임 내 대형 몬스터 도감 순서(MONSTER_ORDER).
+// 몬스터를 추가할 때는 JSON 파일만 넣으면 된다 — 여기 순서에 없으면 가나다순으로 뒤에 붙고, 훈련 통 펀처는 항상 맨 끝.
+// (아이콘은 파일 안 "emoji": { name, id })
 const MONSTER_DIR = path.join(__dirname, 'monsters');
+const MONSTER_ORDER = [
+    "차타카브라", "케마트리스", "라바라 바리나", "바바콩가", "발라하라", "도샤구마",
+    "우드 투나", "푸푸로포루", "레 다우", "네르스큐라", "히라바미", "아자라칸",
+    "누 이그드라", "수호룡 도샤구마", "수호룡 리오레우스", "진 다하드", "수호룡 오도가론 아종", "시이우",
+    "수호룡 알슈베르도", "조 시아", "얀쿡크", "게리오스", "리오레이아", "수호룡 안쟈나프 아종",
+    "리오레우스", "그라비모스", "도도블랑고", "고어 마가라", "알슈베르도", "타마미츠네",
+    "셀레기오스", "라기아크루스", "오메가 플라네테스", "고그마지오스"
+];
 const LAST_IN_LIST = "고양이 훈련 통 펀처";
+const orderRank = name => (name === LAST_IN_LIST ? Infinity : MONSTER_ORDER.includes(name) ? MONSTER_ORDER.indexOf(name) : MONSTER_ORDER.length);
 const monsterList = fs.readdirSync(MONSTER_DIR)
     .filter(f => f.endsWith('.json'))
     .map(f => f.slice(0, -5))
-    .sort((a, b) => (a === LAST_IN_LIST) - (b === LAST_IN_LIST) || a.localeCompare(b, 'ko'));
+    .sort((a, b) => orderRank(a) - orderRank(b) || a.localeCompare(b, 'ko'));
 
 // 몬스터 아이콘 (봇 애플리케이션 이모지) — 목록 버튼과 정보 화면 제목에 표시
 const monsterEmojis = {};
