@@ -1,0 +1,16 @@
+[Unit]
+Description=Guild Discord bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=guild
+WorkingDirectory=/opt/guild
+ExecStart=/usr/bin/node index.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

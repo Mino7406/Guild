@@ -1,0 +1,10 @@
+[Unit]
+Description=Check GitHub for Guild bot updates every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

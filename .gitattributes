@@ -10,3 +10,8 @@
 # Binary files should be left untouched
 *.jar           binary
 
+
+# Linux deploy scripts and systemd units must use lf
+*.sh            text eol=lf
+*.service       text eol=lf
+*.timer         text eol=lf
