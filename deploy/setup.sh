@@ -9,6 +9,14 @@ APP_USER=guild
 REPO=https://github.com/Mino7406/Guild.git
 NODE_MAJOR=22
 
+# 이 호스팅은 IPv6(AAAA) DNS 응답이 안 와서 조회마다 5초씩 멈춘다 → 디스코드 3초 응답 제한 초과.
+# single-request-reopen 으로 해결하고, Proxmox 가 재부팅 때 덮어쓰지 않도록 표시 파일을 둔다.
+if ! grep -q single-request-reopen /etc/resolv.conf; then
+    sed -i '/^options/d' /etc/resolv.conf
+    echo "options single-request-reopen timeout:2 attempts:2" >> /etc/resolv.conf
+fi
+touch /etc/.pve-ignore.resolv.conf
+
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q git curl ca-certificates gnupg

@@ -22,7 +22,8 @@ function isCooldownActive(interaction) {
         const timePassed = currentTime - lastTime;
         if (timePassed < COOLDOWN_TIME) {
             const remainingSeconds = Math.ceil((COOLDOWN_TIME - timePassed) / 1000);
-            interaction.reply(buildNoticeMessage(`<:Timer:1493995200488669217> **${remainingSeconds}초** 후에 다시 시도해 주세요!`));
+            interaction.reply(buildNoticeMessage(`<:Timer:1493995200488669217> **${remainingSeconds}초** 후에 다시 시도해 주세요!`))
+                .catch(e => console.error('[쿨타임 안내 오류]', e.code || '', e.message));
             return true;
         }
     }
@@ -188,7 +189,19 @@ client.once(Events.ClientReady, async c => {
     } catch (e) { console.error(e); }
 });
 
+// 응답 하나가 실패해도(예: 3초 초과로 Unknown interaction) 봇 전체가 꺼지지 않도록 여기서 잡는다
 client.on(Events.InteractionCreate, async interaction => {
+    try {
+        await handleInteraction(interaction);
+    } catch (e) {
+        console.error(`[상호작용 오류] ${interaction.customId || interaction.commandName || interaction.type}:`, e.code || '', e.message);
+    }
+});
+
+client.on(Events.Error, e => console.error('[클라이언트 오류]', e));
+process.on('unhandledRejection', e => console.error('[처리되지 않은 오류]', e));
+
+async function handleInteraction(interaction) {
     if (interaction.isChatInputCommand() && interaction.commandName === '몬스터') {
         if (isCooldownActive(interaction)) return;
         return respondWithContainer(interaction, buildMonsterListContainer());
@@ -210,7 +223,7 @@ client.on(Events.InteractionCreate, async interaction => {
         else if (['dropLow', 'dropHigh'].includes(action)) await sendDropPage(interaction, action === 'dropHigh' ? 'drop_high' : 'drop_low', monsterName, monsterData, page);
         else await sendPage(interaction, action, monsterName, monsterData, page);
     }
-});
+}
 
 // 기존 마크다운 구축 로직 100% 복구
 async function sendPage(interaction, type, monsterName, monsterData, page = 0) {
