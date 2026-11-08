@@ -75,8 +75,9 @@ function buildNoticeMessage(text) {
     return { components: [container], flags: V2_EPHEMERAL };
 }
 
-// /몬스터 목록: Components V2 컨테이너 안에 몬스터 버튼을 한 줄에 5개씩 배치
-const MONSTER_BUTTONS_PER_ROW = 5;
+// /몬스터 목록: Components V2 컨테이너 안에 몬스터 버튼을 한 줄에 3개씩 배치
+// (아이콘이 붙은 버튼은 한 줄에 4~5개면 디스코드 창 폭에 따라 줄이 넘어가 들쭉날쭉해진다)
+const MONSTER_BUTTONS_PER_ROW = 3;
 
 function buildMonsterListContainer() {
     const container = new ContainerBuilder()
