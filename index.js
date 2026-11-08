@@ -151,8 +151,15 @@ async function replacePublicPosts(interaction, message, monsterName) {
     if (!channelId || !message) return;
     if (!publicPosts.has(channelId)) publicPosts.set(channelId, new Map());
     const posts = publicPosts.get(channelId);
+    const clickedAt = interaction.createdTimestamp;
     const stale = [...posts].filter(([id, p]) => id !== message.id && (p.userId === interaction.user.id || p.monsterName === monsterName));
-    posts.set(message.id, { userId: interaction.user.id, monsterName, token: interaction.token, at: Date.now() });
+    const mine = { userId: interaction.user.id, monsterName, token: interaction.token, at: Date.now(), clickedAt };
+    // 같은 사람이 빠르게 연달아 누르면 응답이 도착하는 순서가 뒤바뀔 수 있다.
+    // 내 것보다 나중에 누른 같은 사람의 메시지가 이미 있으면, 늦게 도착한 내 메시지를 지운다(마지막 클릭이 남게).
+    if (stale.some(([, p]) => p.userId === interaction.user.id && p.clickedAt > clickedAt)) {
+        return deletePublicPost(channelId, message.id, mine);
+    }
+    posts.set(message.id, mine);
     if (posts.size > 100) posts.delete(posts.keys().next().value); // 손으로 지운 메시지 기록이 끝없이 쌓이지 않게
     for (const [id, p] of stale) {
         posts.delete(id);
@@ -181,6 +188,16 @@ function getMonsterData(monsterName) {
         if (!fs.existsSync(filePath)) return null;
         return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
     } catch (e) { return null; }
+}
+
+// 서식지는 한 줄에 2곳까지만 놓는다 (3곳 이상을 한 줄에 쓰면 폭이 좁은 화면에서 줄이 넘어가며 글자가 잘린다)
+const HABITATS_PER_LINE = 2;
+function habitatLines(habitat) {
+    const items = (habitat.replace(/\*\*/g, '').match(/<a?:\w+:\d+>[^<]*/g) || []).map(s => s.trim()).filter(Boolean);
+    if (!items.length) return `> ${habitat}`;
+    const lines = [];
+    for (let i = 0; i < items.length; i += HABITATS_PER_LINE) lines.push(`> **${items.slice(i, i + HABITATS_PER_LINE).join('　')}**`);
+    return lines.join('\n');
 }
 
 function getArrayAsString(data, key) {
@@ -309,10 +326,32 @@ client.on(Events.InteractionCreate, async interaction => {
 client.on(Events.Error, e => console.error('[클라이언트 오류]', e));
 process.on('unhandledRejection', e => console.error('[처리되지 않은 오류]', e));
 
+// ── 나만 보는 목록은 사람마다 하나만 ──
+// 나만 보는 메시지는 그 메시지를 만든(또는 그 메시지에서 버튼을 눌러 화면을 바꾼) 상호작용의 토큰으로만
+// 지울 수 있고, 토큰은 15분 동안만 유효하다. 그래서 사람마다 마지막 목록의 토큰을 기억해 두고,
+// 새 목록을 띄우면 예전 목록을 지운다. 15분이 지난 목록은 지울 수 없어 그대로 남는다.
+const privateLists = new Map(); // userId → { applicationId, token, at }
+
+function rememberPrivateList(interaction) {
+    privateLists.set(interaction.user.id, { applicationId: interaction.applicationId, token: interaction.token, at: Date.now() });
+}
+
+async function openPrivateList(interaction, page, mode) {
+    const old = privateLists.get(interaction.user.id);
+    await respondWithContainer(interaction, buildMonsterListContainer(page), mode);
+    rememberPrivateList(interaction);
+    if (!old || Date.now() - old.at >= INTERACTION_TOKEN_MS) return;
+    try {
+        await client.rest.delete(Routes.webhookMessage(old.applicationId, old.token, '@original'));
+    } catch (e) {
+        if (e.code !== 10008) console.error('[이전 목록 삭제 실패]', e.code || '', e.message); // 10008: 이미 닫힘
+    }
+}
+
 async function handleInteraction(interaction) {
     if (interaction.isChatInputCommand() && interaction.commandName === '몬스터') {
         if (isCooldownActive(interaction)) return;
-        return respondWithContainer(interaction, buildMonsterListContainer());
+        return openPrivateList(interaction, 0, 'auto');
     }
 
     if (interaction.isButton()) {
@@ -325,11 +364,17 @@ async function handleInteraction(interaction) {
         if (action === 'dummy') return;
         // 목록으로 돌아가면 보던 몬스터가 있는 페이지를 연다 (예전 메시지의 'list' 버튼은 첫 페이지).
         // 모두가 보는 몬스터 메시지에서 누르면 그 메시지는 그대로 두고, 누른 사람에게만 목록을 따로 띄운다.
+        // 이때 그 사람이 전에 띄워 둔 목록은 지운다.
         if (action === 'list') {
-            const isPublicPost = !interaction.message.flags.has(MessageFlags.Ephemeral);
-            return respondWithContainer(interaction, buildMonsterListContainer(monsterName ? listPageOf(monsterName) : 0), isPublicPost ? 'private' : 'auto');
+            const listPage = monsterName ? listPageOf(monsterName) : 0;
+            if (!interaction.message.flags.has(MessageFlags.Ephemeral)) return openPrivateList(interaction, listPage, 'private');
+            await respondWithContainer(interaction, buildMonsterListContainer(listPage));
+            return rememberPrivateList(interaction); // 목록을 넘길 때마다 지울 수 있는 시간(15분)도 새로 늘어난다
         }
-        if (action === 'listpage') return respondWithContainer(interaction, buildMonsterListContainer(parseInt(monsterName, 10)));
+        if (action === 'listpage') {
+            await respondWithContainer(interaction, buildMonsterListContainer(parseInt(monsterName, 10)));
+            return rememberPrivateList(interaction);
+        }
 
         const monsterData = getMonsterData(monsterName);
         if (!monsterData) return interaction.reply(buildNoticeMessage(`<:X_:1493987174750748812> 데이터 없음: \`${monsterName}\``));
@@ -353,7 +398,7 @@ async function sendPage(interaction, type, monsterName, monsterData, page = 0, m
     if (type === "basic") {
         if (monsterData.species) description += `**【 ${monsterData.species} 】**\n\n`;
         description += `${getArrayAsString(monsterData, "info")}\n\n`;
-        if (monsterData.habitat) description += `**《 서식지 》**\n> ${monsterData.habitat}\n\n`;
+        if (monsterData.habitat) description += `**《 서식지 》**\n${habitatLines(monsterData.habitat)}\n\n`;
         if (monsterData.threat_level) description += `**《 위험도 》**\n> ${monsterData.threat_level}\n\n`;
         [['breakable_parts', '절단/파괴 가능 부위'], ['weak_point', '약점'], ['element_weakness', '추천 속성']].forEach(([k, t]) => {
             if (monsterData[k]) description += `**《 ${t} 》**\n${monsterData[k].map(el => `> ${el.trim()}`).join("\n")}\n\n`;
