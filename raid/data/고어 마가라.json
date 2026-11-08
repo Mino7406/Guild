@@ -1,0 +1,222 @@
+{
+  "name": "고어 마가라",
+  "baseHp": 5100,
+  "parts": [
+    {
+      "id": "p0",
+      "name": "머리",
+      "sides": [
+        "머리"
+      ],
+      "hz": {
+        "slash": 65,
+        "strike": 55,
+        "shot": 45,
+        "fire": 15,
+        "water": 0,
+        "thunder": 15,
+        "ice": 5,
+        "dragon": 15
+      },
+      "hp": 800,
+      "breakable": false,
+      "head": true
+    },
+    {
+      "id": "p1",
+      "name": "촉각",
+      "sides": [
+        "촉각"
+      ],
+      "hz": {
+        "slash": 75,
+        "strike": 70,
+        "shot": 50,
+        "fire": 20,
+        "water": 0,
+        "thunder": 10,
+        "ice": 5,
+        "dragon": 25
+      },
+      "hp": 200,
+      "breakable": true,
+      "head": true
+    },
+    {
+      "id": "p2",
+      "name": "날개다리",
+      "sides": [
+        "오른쪽 날개다리",
+        "왼쪽 날개다리"
+      ],
+      "hz": {
+        "slash": 27,
+        "strike": 27,
+        "shot": 20,
+        "fire": 20,
+        "water": 0,
+        "thunder": 15,
+        "ice": 5,
+        "dragon": 10
+      },
+      "hp": 750,
+      "breakable": false
+    },
+    {
+      "id": "p3",
+      "name": "앞다리",
+      "sides": [
+        "오른쪽 앞다리",
+        "왼쪽 앞다리"
+      ],
+      "hz": {
+        "slash": 42,
+        "strike": 42,
+        "shot": 25,
+        "fire": 10,
+        "water": 0,
+        "thunder": 5,
+        "ice": 5,
+        "dragon": 5
+      },
+      "hp": 350,
+      "breakable": false
+    },
+    {
+      "id": "p4",
+      "name": "꼬리",
+      "sides": [
+        "꼬리"
+      ],
+      "hz": {
+        "slash": 38,
+        "strike": 38,
+        "shot": 25,
+        "fire": 10,
+        "water": 0,
+        "thunder": 10,
+        "ice": 5,
+        "dragon": 5
+      },
+      "hp": 400,
+      "breakable": true,
+      "severable": true
+    },
+    {
+      "id": "p5",
+      "name": "뒷다리",
+      "sides": [
+        "오른쪽 뒷다리",
+        "왼쪽 뒷다리"
+      ],
+      "hz": {
+        "slash": 38,
+        "strike": 38,
+        "shot": 35,
+        "fire": 10,
+        "water": 0,
+        "thunder": 5,
+        "ice": 5,
+        "dragon": 5
+      },
+      "hp": 400,
+      "breakable": false
+    },
+    {
+      "id": "p6",
+      "name": "몸통",
+      "sides": [
+        "몸통"
+      ],
+      "hz": {
+        "slash": 25,
+        "strike": 25,
+        "shot": 20,
+        "fire": 10,
+        "water": 0,
+        "thunder": 5,
+        "ice": 5,
+        "dragon": 5
+      },
+      "hp": 450,
+      "breakable": false
+    },
+    {
+      "id": "p7",
+      "name": "목",
+      "sides": [
+        "목"
+      ],
+      "hz": {
+        "slash": 45,
+        "strike": 45,
+        "shot": 25,
+        "fire": 15,
+        "water": 0,
+        "thunder": 10,
+        "ice": 5,
+        "dragon": 5
+      },
+      "hp": 9999,
+      "breakable": false
+    },
+    {
+      "id": "p8",
+      "name": "날개",
+      "sides": [
+        "오른쪽 날개",
+        "왼쪽 날개"
+      ],
+      "hz": {
+        "slash": 26,
+        "strike": 26,
+        "shot": 15,
+        "fire": 15,
+        "water": 0,
+        "thunder": 10,
+        "ice": 5,
+        "dragon": 5
+      },
+      "hp": 100,
+      "breakable": true
+    }
+  ],
+  "status": {
+    "poison": {
+      "base": 250,
+      "inc": 150,
+      "max": 700,
+      "damage": 150
+    },
+    "sleep": {
+      "base": 250,
+      "inc": 150,
+      "max": 1150,
+      "damage": 0
+    },
+    "paralysis": {
+      "base": 300,
+      "inc": 200,
+      "max": 1500,
+      "damage": 0
+    },
+    "blast": {
+      "base": 70,
+      "inc": 30,
+      "max": 670,
+      "damage": 100
+    },
+    "stun": {
+      "base": 150,
+      "inc": 120,
+      "max": 870,
+      "damage": 0
+    },
+    "exhaust": {
+      "base": 225,
+      "inc": 75,
+      "max": 900,
+      "damage": 0
+    }
+  }
+}

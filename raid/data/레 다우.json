@@ -1,0 +1,143 @@
+{
+  "name": "레 다우",
+  "baseHp": 5000,
+  "parts": [
+    {
+      "id": "p0",
+      "name": "머리",
+      "sides": [
+        "머리"
+      ],
+      "hz": {
+        "slash": 60,
+        "strike": 65,
+        "shot": 50,
+        "fire": 5,
+        "water": 15,
+        "thunder": 0,
+        "ice": 20,
+        "dragon": 5
+      },
+      "hp": 700,
+      "breakable": true,
+      "head": true
+    },
+    {
+      "id": "p1",
+      "name": "몸통",
+      "sides": [
+        "몸통"
+      ],
+      "hz": {
+        "slash": 30,
+        "strike": 30,
+        "shot": 25,
+        "fire": 5,
+        "water": 5,
+        "thunder": 0,
+        "ice": 5,
+        "dragon": 5
+      },
+      "hp": 260,
+      "breakable": false
+    },
+    {
+      "id": "p2",
+      "name": "다리",
+      "sides": [
+        "왼쪽 다리",
+        "오른쪽 다리"
+      ],
+      "hz": {
+        "slash": 37,
+        "strike": 37,
+        "shot": 33,
+        "fire": 5,
+        "water": 5,
+        "thunder": 0,
+        "ice": 5,
+        "dragon": 5
+      },
+      "hp": 200,
+      "breakable": false
+    },
+    {
+      "id": "p3",
+      "name": "꼬리",
+      "sides": [
+        "꼬리"
+      ],
+      "hz": {
+        "slash": 45,
+        "strike": 40,
+        "shot": 45,
+        "fire": 5,
+        "water": 5,
+        "thunder": 0,
+        "ice": 10,
+        "dragon": 5
+      },
+      "hp": 200,
+      "breakable": true,
+      "severable": true
+    },
+    {
+      "id": "p4",
+      "name": "날개",
+      "sides": [
+        "왼쪽 날개",
+        "오른쪽 날개"
+      ],
+      "hz": {
+        "slash": 45,
+        "strike": 50,
+        "shot": 45,
+        "fire": 5,
+        "water": 10,
+        "thunder": 0,
+        "ice": 15,
+        "dragon": 5
+      },
+      "hp": 260,
+      "breakable": true
+    }
+  ],
+  "status": {
+    "poison": {
+      "base": 150,
+      "inc": 100,
+      "max": 550,
+      "damage": 200
+    },
+    "sleep": {
+      "base": 150,
+      "inc": 100,
+      "max": 750,
+      "damage": 0
+    },
+    "paralysis": {
+      "base": 300,
+      "inc": 200,
+      "max": 1500,
+      "damage": 0
+    },
+    "blast": {
+      "base": 70,
+      "inc": 30,
+      "max": 670,
+      "damage": 100
+    },
+    "stun": {
+      "base": 150,
+      "inc": 120,
+      "max": 870,
+      "damage": 0
+    },
+    "exhaust": {
+      "base": 225,
+      "inc": 75,
+      "max": 900,
+      "damage": 0
+    }
+  }
+}

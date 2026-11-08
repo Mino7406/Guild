@@ -9,4 +9,4 @@ node_modules
 .env
 
 # 봇 실행 중 기록(공개 메시지·목록 추적)
-data/
+/data/
