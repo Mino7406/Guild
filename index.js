@@ -34,6 +34,9 @@ function warmConnection() {
 setInterval(warmConnection, WARM_INTERVAL_MS).unref();
 warmConnection();
 
+// /퀘스트·/장비(레이드)를 쓸 수 있는 서버. 다른 서버(본서버 1187373626966671422 포함)에서는 "준비 중" 안내만 보인다.
+const RAID_GUILDS = new Set(['1282694117255548960']); // 테스트 서버
+
 // 응답이 느릴 때 원인을 볼 수 있도록 기록하는 기준 (디스코드 응답 제한은 3초)
 const SLOW_RESPONSE_MS = 1500;
 
@@ -477,7 +480,10 @@ async function handleInteraction(interaction) {
         if (isCooldownActive(interaction)) return;
         return openPrivateList(interaction, 0, 'auto');
     }
-    // 레이드(퀘스트)·장비 — 버튼 ID가 "q:" / "eq:" 로 시작
+    // 레이드(퀘스트)·장비 — 버튼 ID가 "q:" / "eq:" 로 시작. 개발 중이라 테스트 서버에서만 동작
+    const isRaidInteraction = (interaction.isChatInputCommand() && ['퀘스트', '장비'].includes(interaction.commandName))
+        || ((interaction.isButton() || interaction.isStringSelectMenu()) && /^(q|eq):/.test(interaction.customId));
+    if (isRaidInteraction && !RAID_GUILDS.has(interaction.guildId)) return interaction.reply(buildNoticeMessage('해당 기능은 준비 중입니다.'));
     if (interaction.isChatInputCommand() && interaction.commandName === '퀘스트') return quest.openQuestBoard(interaction);
     if (interaction.isChatInputCommand() && interaction.commandName === '장비') return openEquipment(interaction);
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('eq:')) return handleEquipmentSelect(interaction, quest.isLockedForEquip);
