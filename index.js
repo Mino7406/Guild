@@ -55,8 +55,10 @@ const monsterList = fs.readdirSync(MONSTER_DIR)
 // 몬스터 아이콘 (봇 애플리케이션 이모지) — 목록 버튼에 표시
 const monsterEmojis = {};
 for (const name of monsterList) {
+    // 버튼 ID가 "동작_몬스터이름_페이지" 형식이라 이름에 _ 가 있으면 버튼이 엉뚱하게 동작한다
+    if (name.includes('_')) console.error(`[몬스터 파일 이름 오류] "${name}": 이름에 _ 를 쓸 수 없어요 (띄어쓰기로 바꿔 주세요)`);
     try {
-        const emoji = JSON.parse(fs.readFileSync(path.join(MONSTER_DIR, `${name}.json`), 'utf-8')).emoji;
+        const emoji = JSON.parse(fs.readFileSync(path.join(MONSTER_DIR, `${name}.json`), 'utf-8').replace(/^﻿/, '')).emoji;
         if (emoji && emoji.id) monsterEmojis[name] = { name: emoji.name, id: emoji.id };
     } catch (e) { console.error(`[몬스터 파일 오류] ${name}:`, e.message); }
 }
@@ -78,6 +80,7 @@ function isCooldownActive(interaction) {
         }
     }
     cooldowns.set(userId, currentTime);
+    setTimeout(() => { if (cooldowns.get(userId) === currentTime) cooldowns.delete(userId); }, COOLDOWN_TIME).unref(); // 지난 기록이 쌓이지 않게
     return false;
 }
 
@@ -470,8 +473,8 @@ async function handleInteraction(interaction) {
         const parts = interaction.customId.split('_');
         const action = parts[0];
         const monsterName = parts[1];
-        // 탭 버튼을 눌렀을 때는 page 정보가 없으므로 0으로 초기화
-        const page = parts.length > 2 ? parseInt(parts[2], 10) : 0;
+        // 탭 버튼을 눌렀을 때는 page 정보가 없으므로 0으로 초기화 (숫자가 아니면 0)
+        const page = (parts.length > 2 && parseInt(parts[2], 10)) || 0;
 
         if (action === 'dummy') return;
         // 목록으로 돌아가면 보던 몬스터가 있는 페이지를 연다 (예전 메시지의 'list' 버튼은 첫 페이지).
