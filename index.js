@@ -52,19 +52,13 @@ const monsterList = fs.readdirSync(MONSTER_DIR)
     .map(f => f.slice(0, -5))
     .sort((a, b) => orderRank(a) - orderRank(b) || a.localeCompare(b, 'ko'));
 
-// 몬스터 아이콘 (봇 애플리케이션 이모지) — 목록 버튼과 정보 화면 제목에 표시
+// 몬스터 아이콘 (봇 애플리케이션 이모지) — 목록 버튼에 표시
 const monsterEmojis = {};
 for (const name of monsterList) {
     try {
         const emoji = JSON.parse(fs.readFileSync(path.join(MONSTER_DIR, `${name}.json`), 'utf-8')).emoji;
         if (emoji && emoji.id) monsterEmojis[name] = { name: emoji.name, id: emoji.id };
     } catch (e) { console.error(`[몬스터 파일 오류] ${name}:`, e.message); }
-}
-
-function monsterIconText(monsterName, monsterData) {
-    if (monsterData.icon) return `${monsterData.icon} `;
-    const e = monsterEmojis[monsterName];
-    return e ? `<:${e.name}:${e.id}> ` : "";
 }
 
 const cooldowns = new Collection();
@@ -468,8 +462,8 @@ async function handleInteraction(interaction) {
 
 // 기존 마크다운 구축 로직 100% 복구
 async function sendPage(interaction, type, monsterName, monsterData, page = 0, mode = 'auto') {
-    const icon = monsterIconText(monsterName, monsterData);
-    let description = `# ${icon}${monsterName}\n`;
+    // 제목에는 아이콘 없이 이름만 (아이콘은 목록 버튼과 오른쪽 썸네일에 있음)
+    let description = `# ${monsterName}\n`;
 
     let blocks = null; // 칸 단위로 나눌 화면(기본 정보·소재)은 여기에 칸을 모으고, 한 페이지에 정해진 개수만 보여 준다
     if (type === "basic") {
@@ -538,8 +532,7 @@ async function sendPage(interaction, type, monsterName, monsterData, page = 0, m
 
 // 소재 전용 페이지 역시 기존 마크다운 구축 로직 100% 복구
 async function sendDropPage(interaction, rankKey, monsterName, monsterData, page = 0) {
-    const icon = monsterIconText(monsterName, monsterData);
-    const pages = pagesFromBlocks(`# ${icon}${monsterName}\n`, splitIntoBlocks(getArrayAsString(monsterData, rankKey)), DROP_ITEMS_PER_PAGE);
+    const pages = pagesFromBlocks(`# ${monsterName}\n`, splitIntoBlocks(getArrayAsString(monsterData, rankKey)), DROP_ITEMS_PER_PAGE);
 
     const totalPages = pages.length;
     if (page >= totalPages) page = totalPages - 1;
