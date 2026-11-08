@@ -152,14 +152,12 @@ async function respondWithContainer(interaction, container, mode = 'auto') {
 // 봇이 채널에 일반 메시지로 직접 보낸다. 채널에 보낼 권한이 없을 때만 응답(followUp)으로 올린다.
 async function postPublicFromList(interaction, container) {
     // 응답 확인(3초 제한)과 채널 전송은 서로 기다릴 필요가 없어 동시에 보낸다
-    const t0 = Date.now(); let ackMs = -1, postMs = -1;
     const [, sent] = await Promise.allSettled([
-        interaction.deferUpdate().finally(() => { ackMs = Date.now() - t0; }),
+        interaction.deferUpdate(),
         client.rest.post(Routes.channelMessages(interaction.channelId), {
             body: { components: [container.toJSON()], flags: MessageFlags.IsComponentsV2 }
-        }).finally(() => { postMs = Date.now() - t0; })
+        })
     ]);
-    console.log(`[선택 시간] ${interaction.customId}: 응답 확인 ${ackMs}ms, 채널 전송 ${postMs}ms`); // 속도 점검용 (임시)
     let message = sent.status === 'fulfilled' ? sent.value : null;
     if (!message) {
         console.error('[채널 메시지 전송 실패 → 응답으로 올림]', sent.reason?.code || '', sent.reason?.message);
@@ -378,7 +376,6 @@ client.on(Events.InteractionCreate, async interaction => {
         return;
     }
     const handled = Date.now() - start;
-    console.log(`[응답 시간] ${label}: 도착 ${receivedDelay}ms + 처리 ${handled}ms`); // 속도 점검용 (임시)
     if (receivedDelay + handled > SLOW_RESPONSE_MS) {
         console.warn(`[느린 응답] ${label}: 도착 ${receivedDelay}ms + 처리 ${handled}ms (웹소켓 핑 ${client.ws.ping}ms)`);
     }
@@ -450,9 +447,7 @@ async function handleInteraction(interaction) {
         if (action === 'pick') {
             const message = await sendPage(interaction, !monsterData.info && monsterData.hitzone ? "hitzone" : "basic", monsterName, monsterData, 0, 'public');
             privateLists.delete(interaction.user.id); // 고른 목록은 위에서 닫혔다
-            const tc = Date.now();
             await replacePublicPosts(interaction, message, monsterName);
-            console.log(`[선택 시간] ${interaction.customId}: 이전 메시지 정리 ${Date.now() - tc}ms`); // 속도 점검용 (임시)
             return;
         }
         else if (['dropLow', 'dropHigh'].includes(action)) await sendDropPage(interaction, action === 'dropHigh' ? 'drop_high' : 'drop_low', monsterName, monsterData, page);
