@@ -21,6 +21,29 @@ const monsterList = [
     "타마미츠네", "라기아크루스", "셀레기오스", "오메가 플라네테스", "고그마지오스", "고양이 훈련 통 펀처"
 ];
 
+// 몬스터 아이콘 (봇 애플리케이션 이모지) — 목록 버튼과 정보 화면 제목에 표시
+const monsterEmojis = {
+    "레 다우": { name: "Rey_Dau", id: "1568858285669359827" },
+    "우드 투나": { name: "Uth_Duna", id: "1568858291180802219" },
+    "누 이그드라": { name: "Nu_Udra", id: "1568858278287380601" },
+    "진 다하드": { name: "Jin_Dahaad", id: "1568858271593398382" },
+    "리오레우스": { name: "Rathalos", id: "1568858282905440328" },
+    "조 시아": { name: "Zoh_Shia", id: "1568858293206777926" },
+    "알슈베르도": { name: "Arkveld", id: "1568858263976550531" },
+    "고어 마가라": { name: "Gore_Magala", id: "1568858269773209720" },
+    "타마미츠네": { name: "Mizutsune", id: "1568858276508999720" },
+    "라기아크루스": { name: "Lagiacrus", id: "1568858273833029703" },
+    "셀레기오스": { name: "Seregios", id: "1568858288202846298" },
+    "오메가 플라네테스": { name: "Omega_Planetes", id: "1568858280019623936" },
+    "고그마지오스": { name: "Gogmazios", id: "1568858267713675344" }
+};
+
+function monsterIconText(monsterName, monsterData) {
+    if (monsterData.icon) return `${monsterData.icon} `;
+    const e = monsterEmojis[monsterName];
+    return e ? `<:${e.name}:${e.id}> ` : "";
+}
+
 const cooldowns = new Collection();
 const COOLDOWN_TIME = 10000;
 
@@ -67,9 +90,11 @@ function buildMonsterListContainer() {
 
     for (let i = 0; i < monsterList.length; i += MONSTER_BUTTONS_PER_ROW) {
         const row = new ActionRowBuilder().addComponents(
-            monsterList.slice(i, i + MONSTER_BUTTONS_PER_ROW).map(name =>
-                new ButtonBuilder().setCustomId(`pick_${name}`).setLabel(name).setStyle(ButtonStyle.Secondary)
-            )
+            monsterList.slice(i, i + MONSTER_BUTTONS_PER_ROW).map(name => {
+                const button = new ButtonBuilder().setCustomId(`pick_${name}`).setLabel(name).setStyle(ButtonStyle.Secondary);
+                if (monsterEmojis[name]) button.setEmoji(monsterEmojis[name]);
+                return button;
+            })
         );
         container.addActionRowComponents(row);
     }
@@ -245,7 +270,7 @@ async function handleInteraction(interaction) {
 
 // 기존 마크다운 구축 로직 100% 복구
 async function sendPage(interaction, type, monsterName, monsterData, page = 0) {
-    const icon = monsterData.icon ? `${monsterData.icon} ` : "";
+    const icon = monsterIconText(monsterName, monsterData);
     let description = `# ${icon}${monsterName}\n`;
 
     if (type === "basic") {
@@ -312,7 +337,7 @@ async function sendPage(interaction, type, monsterName, monsterData, page = 0) {
 
 // 소재 전용 페이지 역시 기존 마크다운 구축 로직 100% 복구
 async function sendDropPage(interaction, rankKey, monsterName, monsterData, page = 0) {
-    const icon = monsterData.icon ? `${monsterData.icon} ` : "";
+    const icon = monsterIconText(monsterName, monsterData);
     const description = `# ${icon}${monsterName}\n\n${getArrayAsString(monsterData, rankKey)}`;
     const pages = splitToPages(description);
 
