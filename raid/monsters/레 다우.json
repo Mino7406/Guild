@@ -1,0 +1,81 @@
+{
+  "_메모": [
+    "레이드(퀘스트) 몬스터 행동. 수치(체력·육질·부위·상태이상)는 raid/data/<이름>.json, 소재는 monsters/<이름>.json(도감)에서 가져온다.",
+    "moves: target single(한 명) · all(전원), damage [최소, 최대], element 속성(표시용), telegraph 예고 문구({target}은 노리는 사람).",
+    "smash: 필살기 키. smashGap턴 안에는 다시 쓰지 않고 첫 턴에도 쓰지 않는다. 예고를 보고 회피·가드하면 피할 수 있다.",
+    "weights: 다음 행동을 뽑는 가중치(normal 평상시 / rage 분노). rage: 체력이 hpRatio 이하가 되면 분노해 피해 × damageRate."
+  ],
+  "moves": {
+    "tail": {
+      "name": "꼬리 휘두르기",
+      "target": "single",
+      "damage": [
+        30,
+        40
+      ],
+      "telegraph": "레 다우가 꼬리를 낮게 끌며 **{target}**에게 몸을 돌린다..."
+    },
+    "charge": {
+      "name": "돌진",
+      "target": "single",
+      "damage": [
+        40,
+        52
+      ],
+      "telegraph": "레 다우가 날개를 펴고 **{target}**을(를) 향해 몸을 웅크린다..."
+    },
+    "breath": {
+      "name": "방전 브레스",
+      "target": "all",
+      "damage": [
+        32,
+        42
+      ],
+      "element": "thunder",
+      "telegraph": "레 다우의 입가에 푸른 전기가 튄다..."
+    },
+    "thunderfall": {
+      "name": "낙뢰 소환",
+      "target": "all",
+      "damage": [
+        26,
+        34
+      ],
+      "element": "thunder",
+      "telegraph": "레 다우가 하늘을 향해 포효하자 먹구름이 몰려든다..."
+    },
+    "railgun": {
+      "name": "황뢰 레일 캐논",
+      "target": "all",
+      "damage": [
+        85,
+        100
+      ],
+      "element": "thunder",
+      "telegraph": "⚠️ 레 다우의 양 뿔 사이로 거대한 전류가 모이고 있다! **회피하지 않으면 위험하다!**"
+    }
+  },
+  "smash": "railgun",
+  "smashGap": 4,
+  "weights": {
+    "normal": {
+      "tail": 4,
+      "charge": 3,
+      "breath": 2,
+      "thunderfall": 1,
+      "railgun": 1
+    },
+    "rage": {
+      "tail": 3,
+      "charge": 3,
+      "breath": 2,
+      "thunderfall": 2,
+      "railgun": 2
+    }
+  },
+  "rage": {
+    "hpRatio": 0.5,
+    "damageRate": 1.25,
+    "message": "⚡ 레 다우가 분노했다! 온몸의 섬전암이 번쩍인다."
+  }
+}

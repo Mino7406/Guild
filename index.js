@@ -5,12 +5,16 @@ const path = require('path');
 
 const token = process.env.DISCORD_TOKEN;
 const { Agent, request } = require('undici');
+const quest = require('./raid/quest');
+const { openEquipment, handleEquipmentSelect } = require('./raid/equipment');
+const { flushAll } = require('./raid/store');
 
 // 디스코드 API 연결을 60초까지 유지한다. 기본값(약 4초)이면 잠깐만 안 써도 연결이 끊겨서
 // 다음 버튼 클릭 때 TLS 연결을 새로 맺느라 느려진다 (이 서버 CPU에서 새 연결 하나에 약 0.3초).
 const restAgent = new Agent({ connect: { timeout: 30000 }, keepAliveTimeout: 60000, keepAliveMaxTimeout: 600000 });
 const client = new Client({
-    intents: [GatewayIntentBits.Guilds],
+    // GuildMessages: 퀘스트 메시지가 채팅에 묻혔는지 알기 위해(메시지 내용은 읽지 않음)
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
     // 프로필에 "Monster Hunter Wilds 하는 중" 표시 (옵션에 두면 재접속할 때도 자동으로 다시 보낸다)
     presence: { status: 'online', activities: [{ name: 'Monster Hunter Wilds', type: ActivityType.Playing }] },
     rest: { agent: restAgent }
@@ -223,6 +227,7 @@ function saveState() {
 for (const sig of ['SIGTERM', 'SIGINT']) {
     process.once(sig, () => {
         if (saveTimer) { clearTimeout(saveTimer); writeStateNow(); }
+        flushAll(); // 헌터 정보·진행 중 퀘스트
         process.exit(0);
     });
 }
@@ -407,13 +412,17 @@ client.once(Events.ClientReady, async c => {
     const rest = new REST({ version: '10' }).setToken(token);
     try {
         await rest.put(Routes.applicationCommands(c.user.id), {
-            body: [{
-                name: '몬스터',
-                description: '몬스터 목록을 열고 정보를 확인합니다.'
-            }]
+            body: [
+                { name: '몬스터', description: '몬스터 목록을 열고 정보를 확인합니다.' },
+                { name: '퀘스트', description: '몬스터 토벌 퀘스트를 열고 파티를 모집합니다.', contexts: [0] },
+                { name: '장비', description: '내 무기·속성·방어구와 소재함을 확인하고 바꿉니다.' },
+            ]
         });
     } catch (e) { console.error(e); }
+    quest.init(c); // 재시작 전에 진행 중이던 퀘스트 이어가기
 });
+
+client.on(Events.MessageCreate, message => quest.noteChannelMessage(message));
 
 // 응답 하나가 실패해도(예: 3초 초과로 Unknown interaction) 봇 전체가 꺼지지 않도록 여기서 잡는다
 client.on(Events.InteractionCreate, async interaction => {
@@ -468,6 +477,12 @@ async function handleInteraction(interaction) {
         if (isCooldownActive(interaction)) return;
         return openPrivateList(interaction, 0, 'auto');
     }
+    // 레이드(퀘스트)·장비 — 버튼 ID가 "q:" / "eq:" 로 시작
+    if (interaction.isChatInputCommand() && interaction.commandName === '퀘스트') return quest.openQuestBoard(interaction);
+    if (interaction.isChatInputCommand() && interaction.commandName === '장비') return openEquipment(interaction);
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('eq:')) return handleEquipmentSelect(interaction, quest.isLockedForEquip);
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('q:')) return quest.handleQuestSelect(interaction);
+    if (interaction.isButton() && interaction.customId.startsWith('q:')) return quest.handleQuestButton(interaction);
 
     if (interaction.isButton()) {
         const parts = interaction.customId.split('_');
