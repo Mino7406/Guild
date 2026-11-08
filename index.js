@@ -467,9 +467,13 @@ async function sendDropPage(interaction, rankKey, monsterName, monsterData, page
     if (page >= totalPages) page = totalPages - 1;
     if (page < 0) page = 0;
 
+    // 지금 보고 있는 쪽(하위/상위) 버튼은 회색으로 잠가서 어느 쪽인지 보이게 하고, 다른 쪽만 누를 수 있게 한다
+    const isHigh = rankKey === 'drop_high';
     const rankRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`dropLow_${monsterName}`).setLabel("《 하위 》").setEmoji("1492424259262222356").setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId(`dropHigh_${monsterName}`).setLabel("《 상위 》").setEmoji("1492424261032214589").setStyle(ButtonStyle.Success)
+        new ButtonBuilder().setCustomId(`dropLow_${monsterName}`).setLabel("《 하위 》").setEmoji("1492424259262222356")
+            .setStyle(isHigh ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!isHigh),
+        new ButtonBuilder().setCustomId(`dropHigh_${monsterName}`).setLabel("《 상위 》").setEmoji("1492424261032214589")
+            .setStyle(isHigh ? ButtonStyle.Secondary : ButtonStyle.Success).setDisabled(isHigh)
     );
     
     const currentAction = rankKey === 'drop_high' ? 'dropHigh' : 'dropLow';
