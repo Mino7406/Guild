@@ -8,7 +8,7 @@ const { Agent, request } = require('undici');
 const quest = require('./raid/quest');
 const { openEquipment, handleEquipmentSelect } = require('./raid/equipment');
 const { flushAll } = require('./raid/store');
-const { decideAccess } = require('./card-lock');
+const { decideAccess, canToggleLock } = require('./card-lock');
 
 // 디스코드 API 연결을 60초까지 유지한다. 기본값(약 4초)이면 잠깐만 안 써도 연결이 끊겨서
 // 다음 버튼 클릭 때 TLS 연결을 새로 맺느라 느려진다 (이 서버 CPU에서 새 연결 하나에 약 0.3초).
@@ -242,8 +242,8 @@ async function replacePublicPosts(interaction, message, monsterName) {
     if (!publicPosts.has(channelId)) publicPosts.set(channelId, new Map());
     const posts = publicPosts.get(channelId);
     const clickedAt = interaction.createdTimestamp;
-    const stale = [...posts].filter(([id, p]) => id !== message.id && (p.userId === interaction.user.id || p.monsterName === monsterName));
-    const mine = { userId: interaction.user.id, monsterName, token: interaction.token, at: Date.now(), clickedAt, lastAt: Date.now() };
+    const stale = [...posts].filter(([id, p]) => id !== message.id && (p.userId === interaction.user.id || (p.monsterName === monsterName && !p.locked)));
+    const mine = { userId: interaction.user.id, monsterName, token: interaction.token, at: Date.now(), clickedAt };
     // 같은 사람이 빠르게 연달아 누르면 응답이 도착하는 순서가 뒤바뀔 수 있다.
     // 내 것보다 나중에 누른 같은 사람의 메시지가 이미 있으면, 늦게 도착한 내 메시지를 지운다(마지막 클릭이 남게).
     if (stale.some(([, p]) => p.userId === interaction.user.id && p.clickedAt > clickedAt)) {
@@ -316,7 +316,6 @@ function findRequester(node) {
     return null;
 }
 function getRequester(interaction, mode = 'auto') {
-    if (interaction.requesterOverride) return interaction.requesterOverride; // 잠금이 풀린 카드를 넘겨받은 사람
     if (mode === 'public') return interaction.member?.displayName || interaction.user.globalName || interaction.user.username;
     try {
         if (interaction.isMessageComponent() && !interaction.message.flags.has(MessageFlags.Ephemeral)) {
@@ -414,14 +413,25 @@ function pagesFromBlocks(header, blocks, perPage) {
 }
 
 // 기존에 작성하셨던 탭 버튼 로직 100% 원상복구 (버튼 ID 왜곡 방지)
-function getTabButtons(currentTab, monsterName, monsterData) {
+function getTabButtons(currentTab, monsterName, monsterData, lock = null) {
     const row = new ActionRowBuilder();
     row.addComponents(new ButtonBuilder().setCustomId(`list_${monsterName}`).setLabel("목록").setEmoji("📋").setStyle(ButtonStyle.Secondary));
     if (currentTab !== "basic" && monsterData.info) row.addComponents(new ButtonBuilder().setCustomId(`basic_${monsterName}`).setLabel("기본 정보").setEmoji("1492145251941482697").setStyle(ButtonStyle.Secondary));
     if (currentTab !== "hitzone" && monsterData.hitzone) row.addComponents(new ButtonBuilder().setCustomId(`hitzone_${monsterName}`).setLabel("육질 정보").setEmoji("1492145248795758602").setStyle(ButtonStyle.Primary));
     if (currentTab !== "drop" && (monsterData.drop || monsterData.drop_low || monsterData.drop_high)) row.addComponents(new ButtonBuilder().setCustomId(`drop_${monsterName}`).setLabel("소재 정보").setEmoji("1492145247327617185").setStyle(ButtonStyle.Success));
     if (currentTab !== "status" && monsterData.status) row.addComponents(new ButtonBuilder().setCustomId(`status_${monsterName}`).setLabel("상태이상 정보").setEmoji("1492145250192331015").setStyle(ButtonStyle.Danger));
+    // 🔒 잠금 버튼 — 모두가 보는 공개 카드에만 둔다 (lock = { tag: "탭-페이지", locked })
+    if (lock) row.addComponents(new ButtonBuilder().setCustomId(`lock_${monsterName}_${lock.tag}`)
+        .setLabel(lock.locked ? "잠금 중" : "잠금").setEmoji(lock.locked ? "🔒" : "🔓").setStyle(lock.locked ? ButtonStyle.Danger : ButtonStyle.Secondary));
     return row.components.length > 0 ? [row] : [];
+}
+
+// 지금 그리는 메시지가 모두가 보는 공개 카드면 잠금 버튼 정보를 돌려준다 (나만 보는 화면이면 없음)
+function lockInfo(interaction, mode, tag) {
+    if (mode === 'private') return null;
+    if (mode === 'public') return { tag, locked: false };
+    if (!interaction.message || interaction.message.flags.has(MessageFlags.Ephemeral)) return null;
+    return { tag, locked: !!getCardPost(interaction)?.locked };
 }
 
 // 탭 버튼과 섞이지 않도록 페이지네이션 버튼만 생성하는 독립 함수 추가
@@ -505,30 +515,12 @@ async function deletePrivateList(list) {
     }
 }
 
-// 공개 카드의 조작 권한을 판단하고 기록을 갱신한다. 나만 보는 메시지는 남이 볼 수 없으니 제한하지 않는다.
-// 반환: 'owner' | 'locked'(나만 보는 사본으로 보낼 것) | 'takeover'(잠금이 풀려 누른 사람이 새 요청자가 됨)
-function claimCard(interaction, monsterName) {
-    if (!interaction.message || interaction.message.flags.has(MessageFlags.Ephemeral)) return 'owner';
-    const channelId = interaction.channelId;
-    const messageId = interaction.message.id;
-    const posts = publicPosts.get(channelId);
-    const post = posts && posts.get(messageId);
-    const access = decideAccess(post, interaction.user.id);
-    if (access === 'locked') return access;
-    const now = Date.now();
-    if (access === 'takeover') {
-        interaction.requesterOverride = interaction.member?.displayName || interaction.user.globalName || interaction.user.username;
-        if (!publicPosts.has(channelId)) publicPosts.set(channelId, new Map());
-        const map = publicPosts.get(channelId);
-        // 기록이 없던 옛 카드도 이제부터 추적한다 (토큰이 없으면 삭제는 봇 권한으로만 시도)
-        map.set(messageId, { ...(post || { monsterName, at: now, clickedAt: now }), userId: interaction.user.id, lastAt: now });
-        if (map.size > POSTS_PER_CHANNEL) map.delete(map.keys().next().value);
-    } else {
-        post.lastAt = now;
-    }
-    saveState();
-    return access;
+// 공개 카드의 기록(요청자·잠금 상태). 나만 보는 메시지나 기록이 없는 옛 카드는 없음.
+function getCardPost(interaction) {
+    if (!interaction.message || interaction.message.flags.has(MessageFlags.Ephemeral)) return undefined;
+    return publicPosts.get(interaction.channelId)?.get(interaction.message.id);
 }
+const CARD_TABS = new Set(['basic', 'hitzone', 'drop', 'status', 'dropLow', 'dropHigh']);
 
 async function handleInteraction(interaction) {
     if (interaction.isChatInputCommand() && interaction.commandName === '몬스터') {
@@ -579,9 +571,21 @@ async function handleInteraction(interaction) {
             await replacePublicPosts(interaction, message, monsterName);
             return;
         }
-        // 탭·페이지 버튼: 공개 카드는 요청자가 마지막으로 조작한 뒤 5분 동안 요청자만 바꿀 수 있다.
-        // 그 사이 남이 누르면 카드는 그대로 두고 누른 사람에게만 보이는 사본을 띄운다.
-        const mode = claimCard(interaction, monsterName) === 'locked' ? 'private' : 'auto';
+        // 🔒 잠금 버튼: 요청자만 켜고 끌 수 있다. 같은 탭·페이지를 다시 그려 버튼 모양을 바꾼다.
+        if (action === 'lock') {
+            const post = getCardPost(interaction);
+            if (!canToggleLock(post, interaction.user.id)) {
+                return interaction.reply(buildNoticeMessage(post ? '🔒 요청자만 잠글 수 있어요.' : '이 메시지는 잠글 수 없어요. 몬스터를 새로 불러 주세요.'));
+            }
+            post.locked = !post.locked;
+            saveState();
+            const [tab, pg] = (parts[2] || '').split('-');
+            const lockedPage = parseInt(pg, 10) || 0;
+            if (tab === 'dropLow' || tab === 'dropHigh') return sendDropPage(interaction, tab === 'dropHigh' ? 'drop_high' : 'drop_low', monsterName, monsterData, lockedPage);
+            return sendPage(interaction, CARD_TABS.has(tab) ? tab : 'basic', monsterName, monsterData, lockedPage);
+        }
+        // 탭·페이지 버튼: 잠긴 공개 카드를 요청자가 아닌 사람이 누르면 카드는 그대로 두고 누른 사람에게만 보이는 사본을 띄운다.
+        const mode = decideAccess(getCardPost(interaction), interaction.user.id) === 'locked' ? 'private' : 'auto';
         if (['dropLow', 'dropHigh'].includes(action)) await sendDropPage(interaction, action === 'dropHigh' ? 'drop_high' : 'drop_low', monsterName, monsterData, page, mode);
         else await sendPage(interaction, action, monsterName, monsterData, page, mode);
     }
@@ -651,7 +655,7 @@ async function sendPage(interaction, type, monsterName, monsterData, page = 0, m
     // 탭 버튼(기존)과 페이지 버튼(신규)을 안전하게 결합
     const rows = [
         ...getPaginationRow(type, monsterName, page, totalPages),
-        ...getTabButtons(type, monsterName, monsterData)
+        ...getTabButtons(type, monsterName, monsterData, lockInfo(interaction, mode, `${type}-${page}`))
     ];
 
     return respondWithContainer(interaction, buildMonsterPageContainer(monsterData, pages[page], rows, getRequester(interaction, mode)), mode);
@@ -679,7 +683,7 @@ async function sendDropPage(interaction, rankKey, monsterName, monsterData, page
     const rows = [
         ...getPaginationRow(currentAction, monsterName, page, totalPages),
         rankRow,
-        ...getTabButtons("drop", monsterName, monsterData)
+        ...getTabButtons("drop", monsterName, monsterData, lockInfo(interaction, mode, `${currentAction}-${page}`))
     ];
 
     await respondWithContainer(interaction, buildMonsterPageContainer(monsterData, pages[page], rows, getRequester(interaction, mode)), mode);
