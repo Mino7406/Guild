@@ -4,7 +4,8 @@
   "description": "길드",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.13",

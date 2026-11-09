@@ -8,6 +8,7 @@ const { Agent, request } = require('undici');
 const quest = require('./raid/quest');
 const { openEquipment, handleEquipmentSelect } = require('./raid/equipment');
 const { flushAll } = require('./raid/store');
+const { decideAccess } = require('./card-lock');
 
 // 디스코드 API 연결을 60초까지 유지한다. 기본값(약 4초)이면 잠깐만 안 써도 연결이 끊겨서
 // 다음 버튼 클릭 때 TLS 연결을 새로 맺느라 느려진다 (이 서버 CPU에서 새 연결 하나에 약 0.3초).
@@ -242,7 +243,7 @@ async function replacePublicPosts(interaction, message, monsterName) {
     const posts = publicPosts.get(channelId);
     const clickedAt = interaction.createdTimestamp;
     const stale = [...posts].filter(([id, p]) => id !== message.id && (p.userId === interaction.user.id || p.monsterName === monsterName));
-    const mine = { userId: interaction.user.id, monsterName, token: interaction.token, at: Date.now(), clickedAt };
+    const mine = { userId: interaction.user.id, monsterName, token: interaction.token, at: Date.now(), clickedAt, lastAt: Date.now() };
     // 같은 사람이 빠르게 연달아 누르면 응답이 도착하는 순서가 뒤바뀔 수 있다.
     // 내 것보다 나중에 누른 같은 사람의 메시지가 이미 있으면, 늦게 도착한 내 메시지를 지운다(마지막 클릭이 남게).
     if (stale.some(([, p]) => p.userId === interaction.user.id && p.clickedAt > clickedAt)) {
@@ -315,6 +316,7 @@ function findRequester(node) {
     return null;
 }
 function getRequester(interaction, mode = 'auto') {
+    if (interaction.requesterOverride) return interaction.requesterOverride; // 잠금이 풀린 카드를 넘겨받은 사람
     if (mode === 'public') return interaction.member?.displayName || interaction.user.globalName || interaction.user.username;
     try {
         if (interaction.isMessageComponent() && !interaction.message.flags.has(MessageFlags.Ephemeral)) {
@@ -503,6 +505,31 @@ async function deletePrivateList(list) {
     }
 }
 
+// 공개 카드의 조작 권한을 판단하고 기록을 갱신한다. 나만 보는 메시지는 남이 볼 수 없으니 제한하지 않는다.
+// 반환: 'owner' | 'locked'(나만 보는 사본으로 보낼 것) | 'takeover'(잠금이 풀려 누른 사람이 새 요청자가 됨)
+function claimCard(interaction, monsterName) {
+    if (!interaction.message || interaction.message.flags.has(MessageFlags.Ephemeral)) return 'owner';
+    const channelId = interaction.channelId;
+    const messageId = interaction.message.id;
+    const posts = publicPosts.get(channelId);
+    const post = posts && posts.get(messageId);
+    const access = decideAccess(post, interaction.user.id);
+    if (access === 'locked') return access;
+    const now = Date.now();
+    if (access === 'takeover') {
+        interaction.requesterOverride = interaction.member?.displayName || interaction.user.globalName || interaction.user.username;
+        if (!publicPosts.has(channelId)) publicPosts.set(channelId, new Map());
+        const map = publicPosts.get(channelId);
+        // 기록이 없던 옛 카드도 이제부터 추적한다 (토큰이 없으면 삭제는 봇 권한으로만 시도)
+        map.set(messageId, { ...(post || { monsterName, at: now, clickedAt: now }), userId: interaction.user.id, lastAt: now });
+        if (map.size > POSTS_PER_CHANNEL) map.delete(map.keys().next().value);
+    } else {
+        post.lastAt = now;
+    }
+    saveState();
+    return access;
+}
+
 async function handleInteraction(interaction) {
     if (interaction.isChatInputCommand() && interaction.commandName === '몬스터') {
         if (isCooldownActive(interaction)) return;
@@ -552,8 +579,11 @@ async function handleInteraction(interaction) {
             await replacePublicPosts(interaction, message, monsterName);
             return;
         }
-        else if (['dropLow', 'dropHigh'].includes(action)) await sendDropPage(interaction, action === 'dropHigh' ? 'drop_high' : 'drop_low', monsterName, monsterData, page);
-        else await sendPage(interaction, action, monsterName, monsterData, page);
+        // 탭·페이지 버튼: 공개 카드는 요청자가 마지막으로 조작한 뒤 5분 동안 요청자만 바꿀 수 있다.
+        // 그 사이 남이 누르면 카드는 그대로 두고 누른 사람에게만 보이는 사본을 띄운다.
+        const mode = claimCard(interaction, monsterName) === 'locked' ? 'private' : 'auto';
+        if (['dropLow', 'dropHigh'].includes(action)) await sendDropPage(interaction, action === 'dropHigh' ? 'drop_high' : 'drop_low', monsterName, monsterData, page, mode);
+        else await sendPage(interaction, action, monsterName, monsterData, page, mode);
     }
 }
 
@@ -628,7 +658,7 @@ async function sendPage(interaction, type, monsterName, monsterData, page = 0, m
 }
 
 // 소재 전용 페이지 역시 기존 마크다운 구축 로직 100% 복구
-async function sendDropPage(interaction, rankKey, monsterName, monsterData, page = 0) {
+async function sendDropPage(interaction, rankKey, monsterName, monsterData, page = 0, mode = 'auto') {
     const pages = pagesFromBlocks(`# ${monsterName}\n`, splitIntoBlocks(getArrayAsString(monsterData, rankKey)), DROP_ITEMS_PER_PAGE);
 
     const totalPages = pages.length;
@@ -652,7 +682,7 @@ async function sendDropPage(interaction, rankKey, monsterName, monsterData, page
         ...getTabButtons("drop", monsterName, monsterData)
     ];
 
-    await respondWithContainer(interaction, buildMonsterPageContainer(monsterData, pages[page], rows, getRequester(interaction)));
+    await respondWithContainer(interaction, buildMonsterPageContainer(monsterData, pages[page], rows, getRequester(interaction, mode)), mode);
 }
 
 loadState(); // 재시작 전에 올린 공개 메시지·목록 기록 불러오기
