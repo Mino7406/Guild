@@ -420,10 +420,11 @@ function getTabButtons(currentTab, monsterName, monsterData, lock = null) {
     if (currentTab !== "hitzone" && monsterData.hitzone) row.addComponents(new ButtonBuilder().setCustomId(`hitzone_${monsterName}`).setLabel("육질 정보").setEmoji("1492145248795758602").setStyle(ButtonStyle.Primary));
     if (currentTab !== "drop" && (monsterData.drop || monsterData.drop_low || monsterData.drop_high)) row.addComponents(new ButtonBuilder().setCustomId(`drop_${monsterName}`).setLabel("소재 정보").setEmoji("1492145247327617185").setStyle(ButtonStyle.Success));
     if (currentTab !== "status" && monsterData.status) row.addComponents(new ButtonBuilder().setCustomId(`status_${monsterName}`).setLabel("상태이상 정보").setEmoji("1492145250192331015").setStyle(ButtonStyle.Danger));
-    // 🔒 잠금 버튼 — 모두가 보는 공개 카드에만 둔다 (lock = { tag: "탭-페이지", locked })
-    if (lock) row.addComponents(new ButtonBuilder().setCustomId(`lock_${monsterName}_${lock.tag}`)
-        .setLabel(lock.locked ? "잠금 중" : "잠금").setEmoji(lock.locked ? "🔒" : "🔓").setStyle(lock.locked ? ButtonStyle.Danger : ButtonStyle.Secondary));
-    return row.components.length > 0 ? [row] : [];
+    const rows = row.components.length > 0 ? [row] : [];
+    // 🔒 잠금 버튼 — 모두가 보는 공개 카드에만, 탭 버튼 아래 별도 줄로 둔다 (lock = { tag: "탭-페이지", locked })
+    if (lock) rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`lock_${monsterName}_${lock.tag}`)
+        .setLabel(lock.locked ? "잠금 중" : "잠금").setEmoji(lock.locked ? "🔒" : "🔓").setStyle(lock.locked ? ButtonStyle.Danger : ButtonStyle.Secondary)));
+    return rows;
 }
 
 // 지금 그리는 메시지가 모두가 보는 공개 카드면 잠금 버튼 정보를 돌려준다 (나만 보는 화면이면 없음)
