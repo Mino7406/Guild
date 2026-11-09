@@ -19,7 +19,10 @@ echo "배포 시작: ${LOCAL:0:7} -> ${REMOTE:0:7}"
 CHANGED=$(as_app git diff --name-only "$LOCAL" "$REMOTE")
 as_app git reset --hard --quiet "origin/$BRANCH"
 
-if grep -qE '^package(-lock)?\.json$' <<<"$CHANGED"; then
+# 의존성은 package-lock.json 이 바뀔 때만 다시 설치한다 (package.json 의 scripts 같은 부분만 바뀐 경우는 건너뜀).
+# npm 이 없으면 봇을 옛 의존성으로 재시작하지 않고 여기서 멈춰 원인을 로그에 남긴다.
+if grep -qE '^package-lock\.json$' <<<"$CHANGED"; then
+    command -v npm >/dev/null || { echo "오류: package-lock.json 이 바뀌었는데 npm 이 설치돼 있지 않아요" >&2; exit 1; }
     as_app npm ci --omit=dev --no-audit --no-fund
 fi
 
