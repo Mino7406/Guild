@@ -437,13 +437,18 @@ client.once(Events.ClientReady, async c => {
     console.log(`✅ 봇 로그인 완료: ${c.user.tag}`);
     const rest = new REST({ version: '10' }).setToken(token);
     try {
+        // 모든 서버에는 /몬스터 만 보이고, 개발 중인 /퀘스트·/장비 는 테스트 서버에만 등록한다 (다른 서버의 명령어 목록에서 숨김)
         await rest.put(Routes.applicationCommands(c.user.id), {
-            body: [
-                { name: '몬스터', description: '몬스터 목록을 열고 정보를 확인합니다.' },
-                { name: '퀘스트', description: '몬스터 토벌 퀘스트를 열고 파티를 모집합니다.', contexts: [0] },
-                { name: '장비', description: '내 무기·속성·방어구와 소재함을 확인하고 바꿉니다.' },
-            ]
+            body: [{ name: '몬스터', description: '몬스터 목록을 열고 정보를 확인합니다.' }]
         });
+        for (const guildId of RAID_GUILDS) {
+            await rest.put(Routes.applicationGuildCommands(c.user.id, guildId), {
+                body: [
+                    { name: '퀘스트', description: '몬스터 토벌 퀘스트를 열고 파티를 모집합니다.', contexts: [0] },
+                    { name: '장비', description: '내 무기·속성·방어구와 소재함을 확인하고 바꿉니다.' },
+                ]
+            }).catch(e => console.error(`[테스트 서버 명령어 등록 실패] ${guildId}:`, e.code || '', e.message));
+        }
     } catch (e) { console.error(e); }
     quest.init(c); // 재시작 전에 진행 중이던 퀘스트 이어가기
 });
