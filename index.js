@@ -302,7 +302,29 @@ function getArrayAsString(data, key) {
 }
 
 // 몬스터 화면 한 페이지 = 컨테이너(몬스터 색) 안에 [본문 + 썸네일] 섹션, 구분선, 버튼 줄들
-function buildMonsterPageContainer(monsterData, text, rows) {
+// 요청자: 목록에서 몬스터를 고른 사람. 컴포넌트 V2 에는 임베드 푸터가 없어 컨테이너 맨 아래 작은 글씨로 넣는다.
+// 탭·페이지 버튼으로 화면이 갱신될 때는 누른 사람이 아니라 처음 요청한 사람이 유지되도록 기존 메시지에서 읽어 온다.
+const REQUESTER_RE = /^-# 요청자 : (.+)$/m;
+function findRequester(node) {
+    if (!node || typeof node !== 'object') return null;
+    if (typeof node.content === 'string') { const m = node.content.match(REQUESTER_RE); if (m) return m[1]; }
+    for (const child of [...(node.components || []), ...(node.accessory ? [node.accessory] : [])]) {
+        const r = findRequester(child.toJSON ? child.toJSON() : child);
+        if (r) return r;
+    }
+    return null;
+}
+function getRequester(interaction, mode = 'auto') {
+    if (mode === 'public') return interaction.member?.displayName || interaction.user.globalName || interaction.user.username;
+    try {
+        if (interaction.isMessageComponent() && !interaction.message.flags.has(MessageFlags.Ephemeral)) {
+            for (const c of interaction.message.components) { const r = findRequester(c.toJSON ? c.toJSON() : c); if (r) return r; }
+        }
+    } catch (e) { /* 읽지 못하면 요청자 줄 없이 표시 */ }
+    return null;
+}
+
+function buildMonsterPageContainer(monsterData, text, rows, requester = null) {
     let accent = 0xFFFFFF;
     try { if (monsterData.color) accent = resolveColor(monsterData.color); } catch (e) { /* 잘못된 색상값이면 흰색 */ }
 
@@ -323,6 +345,7 @@ function buildMonsterPageContainer(monsterData, text, rows) {
         container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
         container.addActionRowComponents(rows);
     }
+    if (requester) container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# 요청자 : ${requester}`));
     return container;
 }
 
@@ -596,7 +619,7 @@ async function sendPage(interaction, type, monsterName, monsterData, page = 0, m
         ...getTabButtons(type, monsterName, monsterData)
     ];
 
-    return respondWithContainer(interaction, buildMonsterPageContainer(monsterData, pages[page], rows), mode);
+    return respondWithContainer(interaction, buildMonsterPageContainer(monsterData, pages[page], rows, getRequester(interaction, mode)), mode);
 }
 
 // 소재 전용 페이지 역시 기존 마크다운 구축 로직 100% 복구
@@ -624,7 +647,7 @@ async function sendDropPage(interaction, rankKey, monsterName, monsterData, page
         ...getTabButtons("drop", monsterName, monsterData)
     ];
 
-    await respondWithContainer(interaction, buildMonsterPageContainer(monsterData, pages[page], rows));
+    await respondWithContainer(interaction, buildMonsterPageContainer(monsterData, pages[page], rows, getRequester(interaction)));
 }
 
 loadState(); // 재시작 전에 올린 공개 메시지·목록 기록 불러오기
