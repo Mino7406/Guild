@@ -76,6 +76,15 @@ function dcPostInfo(html) {
     return { author, images };
 }
 
+// 개념글 알림용: 어그로·잡담 제목 패턴(웃음·욕설·감탄 자음, 낚시성 단어, 의견·질문·토론 글)
+const NOISE_TITLE_RE = /[ㅋㅎㄷㅠㅜㅗㅅㅂㅈ]{2,}|[!?]{2,}|\?|충격|실화|논란|떡밥|추측|예상|전망|미쳤|난리|대박|헐|ㅁㅊ|존나|씨발|병신|개웃|개쩌|레전드|ㅇㅈ|질문|궁금|뭐임|뭐냐|어떻게|어떡|고민|추천|후기|리뷰|건의|불만|징징|토론|투표|저격|팩폭|합의|인증/;
+// 본문에 '근거'가 있는지: 외부 링크, 이미지·영상 첨부, 글자 수. 근거 없는 낚시·잡담 글을 거르는 데 쓴다.
+function dcEvidence(html) {
+    const body = dcBodyHtml(html);
+    const links = [...body.matchAll(/https?:\/\/([^\/"'\s<>]+)/g)].map(m => m[1].toLowerCase()).filter(h => !/dcinside\.(com|co\.kr)$/.test(h));
+    return { links: [...new Set(links)], media: /<img\b|<iframe\b|<video\b/i.test(body), textLen: stripTags(body.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')).length };
+}
+
 // 글 본문 텍스트(댓글은 제외). 이미지뿐인 글은 빈 문자열에 가깝다.
 function dcBodyHtml(html) {
     const start = html.indexOf('class="write_div"');
@@ -305,7 +314,7 @@ function confirmBody(body) {
 }
 
 module.exports = {
-    cleanDcTitle, parseOfficialList, parseDcList, parseDcBody, dcPostInfo, parseYoutubePlaylist, parseGithubReleases, REFRAMEWORK_API,
+    cleanDcTitle, parseOfficialList, parseDcList, parseDcBody, dcPostInfo, dcEvidence, NOISE_TITLE_RE, parseYoutubePlaylist, parseGithubReleases, REFRAMEWORK_API,
     parseSteamEvents, classifySteam, STEAM_EVENTS_API, findOfficialUpdateLink, versionsOf,
     classifyTitle, confirmBody, classifyYoutube, kindOf, tokenize, similarTitles,
     EVENT_KIND, GENERAL_KIND, OFFICIAL_BASE, YT_UPLOADS_PLAYLIST, KST_MS,

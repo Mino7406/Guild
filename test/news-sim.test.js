@@ -125,13 +125,21 @@ test('01 처음 켤 때는 기존 글을 기억만 하고 아무것도 올리지
 // 개념글(말머리 구분 없이 추천 많이 받은 글) 출처
 test('01b 개념글 출처: 켤 때 12시간 안의 글은 규칙대로 판단해 올리고, 오래된 글은 기억만 한다', async () => {
     const { w } = setup({ init: { ...baseInit(), dcBest: dcHtml([[1537009, '어센던스 메인테마곡 풀버전 드디어 공개', T0 - 30 * MIN], [90, '오래된 와일즈 개념글', T0 - 40 * 3600e3], [91, '와일즈 요즘 재밌네 다들 뭐 하고 있음', T0 - 20 * MIN]]) } });
-    routes.dcView = { '1537009': dcView('어센던스 메인테마곡 순환하는 바람을 엮으며 오케스트라 버전이 공개됨') };
+    routes.dcView = { '1537009': dcView('어센던스 메인테마곡 순환하는 바람을 엮으며 오케스트라 버전이 공개됨 <iframe src="x"></iframe>') };
     await run(w, 12);
     assert.equal(sent.length, 1);
     assert.equal(sent[0].src, 'dcbest');
     assert.equal(sent[0].title, '어센던스 메인테마곡 풀버전 드디어 공개');
     assert.equal(sent[0].kind, '신규 콘텐츠');
     record('개념글 출처(일반 말머리 글)', '[일반] 글도 개념글이면 알림 1개, 와일즈와 무관한 글·오래된 글은 제외', true);
+});
+
+test('01d 개념글 출처: 어그로 제목이거나 근거(링크·사진·영상) 없는 글은 올리지 않는다', async () => {
+    const { w } = setup({ init: { ...baseInit(), dcBest: dcHtml([[90, '오래된 와일즈 개념글', T0 - 40 * 3600e3], [501, '와일즈 신규 DLC 충격 근황 ㅋㅋㅋ', T0 - 20 * MIN], [502, '어센던스 신규 몬스터 공개 일정 정리해봄', T0 - 15 * MIN], [503, '어센던스 DLC 공개 일정 안내', T0 - 10 * MIN]]) } });
+    routes.dcView = { '501': dcView('충격적인 내용 <iframe src="x"></iframe> 진짜임'), '502': dcView('내 생각에는 이럴 것 같음 아마도 그렇지 않을까 하는데'), '503': dcView('공식 안내입니다 <a href="https://x.com/MH_Wilds/status/1">https://x.com/MH_Wilds/status/1</a> 일정 확인하세요') };
+    await run(w, 12);
+    assert.deepEqual(sent.map(s => s.title), ['어센던스 DLC 공개 일정 안내']);
+    record('개념글 낚시글 거르기', '어그로 제목·근거 없는 글은 제외, 공식 링크가 있는 소식만 알림', true);
 });
 
 test('01c 개념글 출처: 공식 말머리 글이 개념글에도 올라와도 한 번만 알린다', async () => {

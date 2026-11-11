@@ -61,6 +61,10 @@ async function fetchText(url, headers = {}) {
     return text;
 }
 
+// 본문 근거(링크·첨부·글자 수) — 개념글 알림의 낚시글 거르기에 쓴다. 실패해도 판단만 못 할 뿐 알림 자체에는 영향이 없다.
+function evidenceOf(html) {
+    try { return parse.dcEvidence(html ?? ''); } catch { return null; }
+}
 // 디시 원글의 첫 사진(있으면)과 작성자. 사진을 못 찾아도 알림 판단에는 영향이 없다.
 function imageOf(html) {
     try {
@@ -133,7 +137,7 @@ function buildSources(env = process.env) {
                     // 링크 없이 사진뿐이면 버튼(내용 보기)이 디시 원글로 간다
                     return { include: true, kind: c.kind, versions: parse.versionsOf(e.title), versionTier: 'fan', ...imageOf(html) };
                 }
-                return { include: true, kind: c.kind, ...imageOf(html) };
+                return { include: true, kind: c.kind, ...imageOf(html), evidence: evidenceOf(html) };
             },
         },
     ];
@@ -148,6 +152,10 @@ function buildSources(env = process.env) {
             if (!v.include) return v;
             // 개념글에는 잡담·토론도 많아서, 점검·패치·신규 콘텐츠·행사처럼 소식 키워드로 분류되는 글만 올린다('일반 소식'으로만 분류되는 글은 제외)
             if (v.kind?.id === 'news') return { include: false, reason: '개념글이지만 소식 키워드 없음' };
+            // 어그로·잡담 제목이거나, 본문에 근거(공식 링크·이미지·영상)가 없거나 글이 너무 짧으면 제외
+            if (parse.NOISE_TITLE_RE.test(e.title)) return { include: false, reason: '어그로·잡담 제목' };
+            const ev = v.evidence;
+            if (!ev || (!ev.links.length && !ev.media) || ev.textLen < 15) return { include: false, reason: '근거(링크·사진·영상)나 내용이 부족' };
             return { ...v, emojiSource: v.emojiSource ?? 'dc' };
         },
     });
