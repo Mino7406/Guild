@@ -1,5 +1,5 @@
 // 테스트 서버의 테스트 채널에 "모든 임베드 모양 샘플"과 "최근 실제 소식"을 올린다(임시 점검용).
-// 슬래시 명령어(/소식테스트)와 같은 코드를 쓰며, 운영 기록(알린 글·버전·카드)은 읽지도 쓰지도 않는다.
+// 슬래시 명령어(/관리)와 같은 코드를 쓰며, 운영 기록(알린 글·버전·카드)은 읽지도 쓰지도 않는다.
 // 서버에서 실행:  cd /opt/guild && runuser -u guild -- node deploy/preview-news.js [samples|recent|both]
 // (.env 의 DISCORD_TOKEN 을 읽는다 — 토큰은 화면에 출력하지 않는다. 메시지는 테스트 채널에만 올린다)
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });

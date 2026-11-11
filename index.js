@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Events, REST, Routes, ActionRowBuilder, ButtonBuilder, ButtonStyle, Collection, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, SectionBuilder, ThumbnailBuilder, MessageFlags, resolveColor, ActivityType } = require('discord.js');
+const { Client, GatewayIntentBits, Events, REST, Routes, ActionRowBuilder, ButtonBuilder, ButtonStyle, Collection, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, SectionBuilder, ThumbnailBuilder, MessageFlags, resolveColor, ActivityType, EmbedBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -33,16 +33,17 @@ function warmConnection() {
 setInterval(warmConnection, WARM_INTERVAL_MS).unref();
 warmConnection();
 
-// 테스트 서버(NEWS_TEST_GUILD_ID)에서만 쓰는 임시 명령어. 시작할 때 이 서버의 서버 전용 목록을 아래 내용으로 덮어쓰므로
-// 폐기한 /퀘스트·/장비도 함께 지워지고, 다른 서버의 명령어 목록에는 보이지 않는다.
+// 테스트 서버(NEWS_TEST_GUILD_ID)에서만 쓰는 관리 명령어. 시작할 때 이 서버의 서버 전용 목록을 아래 내용으로 덮어쓰므로
+// 폐기한 /퀘스트·/장비·/소식테스트도 함께 지워지고, 다른 서버의 명령어 목록에는 보이지 않는다.
 const TEST_GUILD_COMMANDS = [{
-    name: '소식테스트',
-    description: '[테스트] 소식 알림의 모든 임베드 모양과 최근 소식을 테스트 채널에 올립니다.',
-    options: [{
-        type: 3, name: '종류', description: '무엇을 올릴지(기본: 둘 다)',
-        choices: [{ name: '모든 임베드 샘플', value: 'samples' }, { name: '최근 실제 소식', value: 'recent' }, { name: '둘 다', value: 'both' }],
-    }],
+    name: '관리',
+    description: '[관리] 길드봇 소식 기능 일시정지/재개와 소식 테스트 패널을 엽니다.',
+    default_member_permissions: '8', // 관리자만
 }];
+
+// 소식 기능 일시정지 상태 (꺼졌다 켜져도 유지)
+const adminStore = createStore('admin', { newsPaused: false });
+const isNewsPaused = () => !!adminStore.data.newsPaused;
 
 // 응답이 느릴 때 원인을 볼 수 있도록 기록하는 기준 (디스코드 응답 제한은 3초)
 const SLOW_RESPONSE_MS = 1500;
@@ -463,7 +464,7 @@ client.once(Events.ClientReady, async c => {
         await rest.put(Routes.applicationGuildCommands(c.user.id, NEWS_TEST_GUILD_ID), { body: TEST_GUILD_COMMANDS })
             .catch(e => console.error(`[테스트 서버 명령어 등록 실패] ${NEWS_TEST_GUILD_ID}:`, e.code || '', e.message));
     } catch (e) { console.error(e); }
-    startNewsWatcher(c, createStore('news', {})); // 와일즈 소식(공식 패치노트·캡콤아시아 유튜브·디시 제보) 자동 공지
+    startNewsWatcher(c, createStore('news', {}), isNewsPaused); // 와일즈 소식(공식 패치노트·캡콤아시아 유튜브·디시 제보) 자동 공지
 });
 
 // 응답 하나가 실패해도(예: 3초 초과로 Unknown interaction) 봇 전체가 꺼지지 않도록 여기서 잡는다
@@ -521,17 +522,38 @@ function getCardPost(interaction) {
 }
 const CARD_TABS = new Set(['basic', 'hitzone', 'drop', 'status', 'dropLow', 'dropHigh']);
 
-// /소식테스트 (임시, 테스트 서버 전용): 모든 임베드 모양 샘플과 최근 실제 소식을 테스트 채널에 올린다. 운영 기록은 건드리지 않는다.
+// /관리: 임베드 + 버튼 패널 (테스트 서버 전용). 소식 일시정지/재개와 소식 테스트(임베드 샘플·최근 실제 소식)를 한곳에 모았다.
+// 테스트는 운영 기록을 건드리지 않는다.
+function buildAdminPanel() {
+    const paused = isNewsPaused();
+    const embed = new EmbedBuilder()
+        .setColor(paused ? 0xED4245 : 0x57F287)
+        .setTitle('🛠️ 길드봇 관리')
+        .setDescription([
+            `**소식 알림:** ${paused ? '⏸️ 일시정지 중' : '▶️ 작동 중'}`,
+            '',
+            '**소식 테스트**',
+            `<#${NEWS_TEST_CHANNEL_ID}> 에 올립니다. 실제 알림 기록에는 영향이 없어요.`,
+        ].join('\n'));
+    const rows = [
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('admin_toggle').setLabel(paused ? '소식 재개' : '소식 일시정지').setEmoji(paused ? '▶️' : '⏸️').setStyle(paused ? ButtonStyle.Success : ButtonStyle.Danger)
+        ),
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('admin_test_samples').setLabel('임베드 샘플').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('admin_test_recent').setLabel('최근 실제 소식').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('admin_test_both').setLabel('둘 다').setStyle(ButtonStyle.Primary)
+        ),
+    ];
+    return { embeds: [embed], components: rows };
+}
+
 let newsPreviewRunning = false;
-async function runNewsPreview(interaction) {
-    if (interaction.guildId !== NEWS_TEST_GUILD_ID) {
-        return interaction.reply({ content: '이 명령어는 테스트 서버에서만 쓸 수 있습니다.', flags: MessageFlags.Ephemeral });
-    }
-    if (newsPreviewRunning) return interaction.reply({ content: '이미 올리는 중입니다. 끝난 뒤에 다시 실행해 주세요.', flags: MessageFlags.Ephemeral });
+async function runNewsPreview(interaction, mode) {
+    if (newsPreviewRunning) return interaction.reply({ content: '이미 올리는 중입니다. 끝난 뒤에 다시 눌러 주세요.', flags: MessageFlags.Ephemeral });
     newsPreviewRunning = true;
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     try {
-        const mode = interaction.options.getString('종류') ?? 'both';
         const channel = await client.channels.fetch(NEWS_TEST_CHANNEL_ID);
         if (!channel?.isTextBased()) throw new Error(`테스트 채널을 찾을 수 없음(${NEWS_TEST_CHANNEL_ID})`);
         const emojiIds = await fetchEmojiIds(client);
@@ -554,8 +576,27 @@ async function runNewsPreview(interaction) {
     }
 }
 
+async function handleAdminInteraction(interaction) {
+    if (interaction.guildId !== NEWS_TEST_GUILD_ID) {
+        return interaction.reply({ content: '이 기능은 테스트 서버에서만 쓸 수 있습니다.', flags: MessageFlags.Ephemeral });
+    }
+    if (interaction.isChatInputCommand()) return interaction.reply({ ...buildAdminPanel(), flags: MessageFlags.Ephemeral });
+    if (!interaction.memberPermissions?.has('Administrator')) {
+        return interaction.reply({ content: '관리자만 쓸 수 있습니다.', flags: MessageFlags.Ephemeral });
+    }
+    if (interaction.customId === 'admin_toggle') {
+        adminStore.data.newsPaused = !adminStore.data.newsPaused;
+        adminStore.save();
+        console.log(`[소식] ${adminStore.data.newsPaused ? '일시정지' : '재개'} (by ${interaction.user.tag})`);
+        return interaction.update(buildAdminPanel());
+    }
+    const mode = interaction.customId.replace('admin_test_', '');
+    if (['samples', 'recent', 'both'].includes(mode)) return runNewsPreview(interaction, mode);
+}
+
 async function handleInteraction(interaction) {
-    if (interaction.isChatInputCommand() && interaction.commandName === '소식테스트') return runNewsPreview(interaction);
+    if (interaction.isChatInputCommand() && interaction.commandName === '관리') return handleAdminInteraction(interaction);
+    if (interaction.isButton() && interaction.customId.startsWith('admin_')) return handleAdminInteraction(interaction);
     if (interaction.isChatInputCommand() && interaction.commandName === '몬스터') {
         if (isCooldownActive(interaction)) return;
         return openPrivateList(interaction, 0, 'auto');

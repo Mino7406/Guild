@@ -365,7 +365,7 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
 
 // 같은 오류가 계속 나도 로그를 도배하지 않게 출처별로 1시간에 한 번만 남긴다.
 let timer = null;
-function startNewsWatcher(client, store) {
+function startNewsWatcher(client, store, isPaused = () => false) {
     if (timer) return;
     const sources = buildSources();
     if (!process.env.YOUTUBE_API_KEY) console.log('[소식] YOUTUBE_API_KEY 가 없어 유튜브 감지는 꺼져 있습니다.');
@@ -410,9 +410,11 @@ function startNewsWatcher(client, store) {
         },
         logInfo: msg => console.log(`[소식] ${msg}`),
     });
-    timer = setInterval(() => { watcher.tick().catch(e => console.error('[소식] 확인 오류:', e)); }, TICK_MS);
+    // 일시정지 중에는 확인도 알림도 하지 않는다(재개하면 그때부터 다시 확인)
+    const run = () => { if (!isPaused()) watcher.tick().catch(e => console.error('[소식] 확인 오류:', e)); };
+    timer = setInterval(run, TICK_MS);
     timer.unref?.();
-    watcher.tick().catch(e => console.error('[소식] 확인 오류:', e));
+    run();
 }
 
 // ── 테스트용 미리보기(임시) ─────────────────────────────────────────────────────
