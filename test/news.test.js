@@ -167,7 +167,7 @@ test('테스트 미리보기: 모든 임베드 종류 샘플을 만들고(실제
     assert.match(btn(linkCard).url, /info\.monsterhunter\.com\/wilds\/update\/ko-kr\/Ver\.1\.042\.00\.03\.html/);
     const photoCard = buildPayload(samples[byLabel('사진뿐')].source, samples[byLabel('사진뿐')].entry, samples[byLabel('사진뿐')].verdict, {});
     assert.match(btn(photoCard).url, /gall\.dcinside\.com/);
-    assert.equal(btn(photoCard).label, '내용 보기');
+    assert.equal(btn(photoCard).label, '🔗 내용 보기');
 });
 
 test('모든 카드의 버튼은 하나이고 이름은 "내용 보기"로 통일(디시 원글 버튼 없음)', () => {
@@ -176,12 +176,12 @@ test('모든 카드의 버튼은 하나이고 이름은 "내용 보기"로 통�
     const entry = { title: '제목', url: 'https://example.com/x', at: 1, tags: [], summary: '' };
     for (const id of ['official', 'dc', 'reframework']) {
         const b = walkButtons(buildPayload(sources[id], entry, { include: true, kind: { label: 'k' } }, { [id]: '1' }));
-        assert.deepEqual(b.map(x => x.label), ['내용 보기'], id);
+        assert.deepEqual(b.map(x => x.label), ['🔗 내용 보기'], id);
         assert.equal(b[0].url, 'https://example.com/x');
     }
     // 판정이 주소를 바꾼 경우(디시 글의 공식 링크)에도 버튼은 하나
     const b = walkButtons(buildPayload(sources.dc, entry, { include: true, kind: { label: 'k' }, url: 'https://info.monsterhunter.com/wilds/update/ko-kr/Ver.1.042.00.05.html', sourceLabel: 'Update Information', emojiSource: 'official' }, { official: '1' }));
-    assert.deepEqual(b.map(x => [x.label, x.url]), [['내용 보기', 'https://info.monsterhunter.com/wilds/update/ko-kr/Ver.1.042.00.05.html']]);
+    assert.deepEqual(b.map(x => [x.label, x.url]), [['🔗 내용 보기', 'https://info.monsterhunter.com/wilds/update/ko-kr/Ver.1.042.00.05.html']]);
 });
 
 test('출처별 이모지·썸네일 매칭', () => {

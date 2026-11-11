@@ -61,7 +61,7 @@ function setup({ youtube = true, init = {} } = {}) {
             // 유튜브는 일반 메시지(링크 임베드), 나머지는 카드(컴포넌트 v2)
             const lines = payload.content !== undefined ? [payload.content] : flatten(payload.components[0]);
             const buttons = []; (function walk(x) { if (!x || typeof x !== 'object') return; if (x.url && x.label) buttons.push({ label: x.label, url: x.url }); Object.values(x).forEach(walk); })(payload.components?.[0]?.toJSON());
-            sent.push({ buttons, heading: lines[1] ?? '', src: source.id, title: entry.title, kind: verdict.kind.label, lines, button: verdict.button ?? '내용 보기', thumb: !!verdict.thumb, url: entry.url, plain: payload.content !== undefined, flags: payload.flags ?? 0 });
+            sent.push({ buttons, heading: lines[1] ?? '', src: source.id, title: entry.title, kind: verdict.kind.label, lines, button: verdict.button ?? '🔗 내용 보기', thumb: !!verdict.thumb, url: entry.url, plain: payload.content !== undefined, flags: payload.flags ?? 0 });
             return 'm' + sent.length;
         },
         // 먼저 나간 카드를 고치는 동작(실제 코드와 같은 방식으로 카드를 다시 만든다)
@@ -373,7 +373,7 @@ test('16 디시 패치노트 글에 공식 페이지 링크가 있으면 공식�
     assert.equal(d[0].heading, '### 업데이트 개요 (Ver.1.042.00.05)');
     assert.ok(d[0].lines[0].includes('Update Information'), d[0].lines[0]);
     assert.ok(d[0].lines.join(' ').includes('디시 제보로 먼저 확인'));
-    assert.deepEqual(d[0].buttons.map(b => b.label), ['내용 보기']);   // 버튼은 하나, 이름은 '내용 보기'
+    assert.deepEqual(d[0].buttons.map(b => b.label), ['🔗 내용 보기']);   // 버튼은 하나, 이름은 '내용 보기'
     assert.equal(d[0].buttons[0].url, OFF);                           // 공식 페이지로 간다
     assert.ok(setup.logs.some(m => m.includes('이미 알린 버전')));
     // 뒤늦게 스팀 한국어 공지가 올라오면 새 메시지를 보내지 않고, 먼저 나간 카드를 자세한 내용으로 고친다
@@ -528,7 +528,7 @@ test('17 디시 패치노트 글에 링크 없이 사진뿐이면 디시 제보�
     const d = sent.filter(s => s.src === 'dc');
     assert.equal(d.length, 1);
     assert.ok(d[0].lines[0].includes('몬스터헌터 시리즈 갤러리 ⓜ'), d[0].lines[0]);
-    assert.deepEqual(d[0].buttons.map(b => b.label), ['내용 보기']);
+    assert.deepEqual(d[0].buttons.map(b => b.label), ['🔗 내용 보기']);
     assert.match(d[0].buttons[0].url, /gall.dcinside.com.*no=701/);
     record('디시 패치노트(사진뿐)', '디시 제보로 표기, 버튼(내용 보기)=디시 원글', true);
 });

@@ -157,7 +157,7 @@ function dayText(at) {
 
 // 출처별 봇 전용(애플리케이션) 이모지 — deploy/register-emojis.js 가 등록한 이름. 카드 썸네일에 쓴다(맨 위 소제목 앞에는 이모지를 붙이지 않는다).
 const EMOJI_NAMES = { official: 'news_wilds', dc: 'news_dcinside', youtube: 'news_youtube', reframework: 'news_github' };
-const BUTTON_LABEL = '내용 보기';
+const BUTTON_LABEL = '🔗 내용 보기';
 const emojiThumb = id => `https://cdn.discordapp.com/emojis/${id}.png?size=128`;
 
 // emojiIds: { 출처id: 이모지ID } — 아직 등록 전이면 비어 있고, 그러면 예전 방식(기본 이모지·공식 이미지)으로 보낸다.
@@ -193,7 +193,7 @@ function buildPayload(source, entry, verdict, emojiIds = {}) {
         ));
     }
     container.addActionRowComponents(new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(BUTTON_LABEL).setURL(url),   // 모든 카드의 버튼 이름은 '내용 보기'로 통일
+        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(BUTTON_LABEL).setURL(url),   // 모든 카드의 버튼 이름은 '🔗 내용 보기'로 통일
     ));
     return { components: [container], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
 }
