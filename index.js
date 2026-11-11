@@ -38,7 +38,7 @@ warmConnection();
 const TEST_GUILD_COMMANDS = [];
 const GLOBAL_COMMANDS = [
     { name: '몬스터', description: '몬스터 목록을 열고 정보를 확인합니다.' },
-    { name: '관리', description: '[관리] 길드봇 소식 기능 일시정지/재개, 소식 삭제, 상태 확인을 합니다.' },
+    { name: '길드관리', description: '[관리] 길드봇 소식 기능 일시정지/재개, 소식 삭제, 상태 확인을 합니다.' },
 ];
 
 // 소식 기능 일시정지 상태 (꺼졌다 켜져도 유지)
@@ -528,7 +528,7 @@ function getCardPost(interaction) {
 }
 const CARD_TABS = new Set(['basic', 'hitzone', 'drop', 'status', 'dropLow', 'dropHigh']);
 
-// /관리: 컴포넌트 v2 패널(모든 서버에서 열림, 지정 유저·테스트 서버 관리자만 사용). 소식 일시정지/재개·상태 확인·잘못 올라온 소식 삭제를 한곳에 모았고, 테스트 항목은 테스트 서버에서만 보인다.
+// /길드관리: 컴포넌트 v2 패널(모든 서버에서 열림, .env 의 ADMIN_ID 유저만 사용). 소식 일시정지/재개·상태 확인·잘못 올라온 소식 삭제를 한곳에 모았고, 테스트 항목은 테스트 서버에서만 보인다.
 // 테스트는 운영 기록(알린 글·버전·카드)을 건드리지 않는다.
 // 나만 보는 안내 한 줄(컴포넌트 v2 메시지에는 content 를 못 쓰므로 컨테이너에 담는다)
 function adminNotice(text, rows = [], accent = DEFAULT_ACCENT) {
@@ -609,7 +609,7 @@ function buildDeleteList() {
 
 async function handleAdminInteraction(interaction) {
     // 관리 요청이 봇에 닿았는지·허용됐는지 기록(권한 문제를 추적하기 위해)
-    console.log(`[관리] ${interaction.isChatInputCommand() ? '/관리' : interaction.customId} — ${interaction.user.tag}(${interaction.user.id}) 서버 ${interaction.guildId ?? 'DM'} → ${canUseAdmin(interaction) ? '허용' : '거부'}`);
+    console.log(`[관리] ${interaction.isChatInputCommand() ? '/길드관리' : interaction.customId} — ${interaction.user.tag}(${interaction.user.id}) 서버 ${interaction.guildId ?? 'DM'} → ${canUseAdmin(interaction) ? '허용' : '거부'}`);
     if (!canUseAdmin(interaction)) return interaction.reply(adminNotice('관리자만 쓸 수 있습니다.'));
     if (interaction.isChatInputCommand()) return interaction.reply(buildAdminPanel(interaction.guildId));
     // 이미 떠 있는 메시지를 고치는 응답(v2 표시는 메시지에 이미 있어서 components 만 보낸다)
@@ -660,7 +660,7 @@ async function handleAdminInteraction(interaction) {
 }
 
 async function handleInteraction(interaction) {
-    if (interaction.isChatInputCommand() && interaction.commandName === '관리') return handleAdminInteraction(interaction);
+    if (interaction.isChatInputCommand() && interaction.commandName === '길드관리') return handleAdminInteraction(interaction);
     if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('admin_')) return handleAdminInteraction(interaction);
     if (interaction.isChatInputCommand() && interaction.commandName === '몬스터') {
         if (isCooldownActive(interaction)) return;
