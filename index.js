@@ -33,18 +33,21 @@ function warmConnection() {
 setInterval(warmConnection, WARM_INTERVAL_MS).unref();
 warmConnection();
 
-// 테스트 서버(NEWS_TEST_GUILD_ID)에서만 쓰는 관리 명령어. 시작할 때 이 서버의 서버 전용 목록을 아래 내용으로 덮어쓰므로
-// 폐기한 /퀘스트·/장비·/소식테스트도 함께 지워지고, 다른 서버의 명령어 목록에는 보이지 않는다.
-const TEST_GUILD_COMMANDS = [{
-    name: '관리',
-    description: '[관리] 길드봇 소식 기능 일시정지/재개와 소식 테스트 패널을 엽니다.',
-}];
+// /관리는 모든 서버에 등록한다(아래 ClientReady). 테스트 서버 전용 목록은 이제 비어 있고, 시작할 때 이 서버의 서버 전용 목록을
+// 이 내용으로 덮어써서 예전에 등록한 서버 전용 명령어(/소식테스트·/관리 등)를 지운다 — 남겨 두면 전체 /관리와 이중으로 보인다.
+const TEST_GUILD_COMMANDS = [];
+const GLOBAL_COMMANDS = [
+    { name: '몬스터', description: '몬스터 목록을 열고 정보를 확인합니다.' },
+    { name: '관리', description: '[관리] 길드봇 소식 기능 일시정지/재개, 소식 삭제, 상태 확인을 합니다.' },
+];
 
 // 소식 기능 일시정지 상태 (꺼졌다 켜져도 유지)
 const adminStore = createStore('admin', { newsPaused: false });
 // /관리 사용 가능: 서버 관리자 권한이 있는 사람 또는 아래 지정 유저
 const ADMIN_USER_IDS = ['457437911869161472'];
-const canUseAdmin = interaction => ADMIN_USER_IDS.includes(interaction.user.id) || !!interaction.memberPermissions?.has('Administrator');
+// 다른 서버의 관리자가 이 봇의 소식 기능을 멈추지 못하도록, 서버 관리자 권한은 테스트 서버에서만 인정한다(다른 서버는 지정 유저만).
+const canUseAdmin = interaction => ADMIN_USER_IDS.includes(interaction.user.id)
+    || (interaction.guildId === NEWS_TEST_GUILD_ID && !!interaction.memberPermissions?.has('Administrator'));
 const isNewsPaused = () => !!adminStore.data.newsPaused;
 
 // 응답이 느릴 때 원인을 볼 수 있도록 기록하는 기준 (디스코드 응답 제한은 3초)
@@ -460,9 +463,9 @@ client.once(Events.ClientReady, async c => {
     const rest = new REST({ version: '10' }).setToken(token);
     try {
         await rest.put(Routes.applicationCommands(c.user.id), {
-            body: [{ name: '몬스터', description: '몬스터 목록을 열고 정보를 확인합니다.' }]
+            body: GLOBAL_COMMANDS
         });
-        // 테스트 서버 전용 명령어 등록(이 서버 목록을 덮어써서 폐기한 레이드 명령어도 지운다)
+        // 테스트 서버 전용 목록을 비워 옛 서버 전용 명령어를 지운다
         await rest.put(Routes.applicationGuildCommands(c.user.id, NEWS_TEST_GUILD_ID), { body: TEST_GUILD_COMMANDS })
             .catch(e => console.error(`[테스트 서버 명령어 등록 실패] ${NEWS_TEST_GUILD_ID}:`, e.code || '', e.message));
     } catch (e) { console.error(e); }
@@ -524,7 +527,7 @@ function getCardPost(interaction) {
 }
 const CARD_TABS = new Set(['basic', 'hitzone', 'drop', 'status', 'dropLow', 'dropHigh']);
 
-// /관리: 컴포넌트 v2 패널 (테스트 서버 전용). 소식 일시정지/재개·상태 확인·잘못 올라온 소식 삭제·테스트를 한곳에 모았다.
+// /관리: 컴포넌트 v2 패널(모든 서버에서 열림, 지정 유저·테스트 서버 관리자만 사용). 소식 일시정지/재개·상태 확인·잘못 올라온 소식 삭제를 한곳에 모았고, 테스트 항목은 테스트 서버에서만 보인다.
 // 테스트는 운영 기록(알린 글·버전·카드)을 건드리지 않는다.
 // 나만 보는 안내 한 줄(컴포넌트 v2 메시지에는 content 를 못 쓰므로 컨테이너에 담는다)
 function adminNotice(text, rows = [], accent = DEFAULT_ACCENT) {
@@ -604,7 +607,6 @@ function buildDeleteList() {
 }
 
 async function handleAdminInteraction(interaction) {
-    if (interaction.guildId !== NEWS_TEST_GUILD_ID) return interaction.reply(adminNotice('이 기능은 테스트 서버에서만 쓸 수 있습니다.'));
     if (!canUseAdmin(interaction)) return interaction.reply(adminNotice('관리자만 쓸 수 있습니다.'));
     if (interaction.isChatInputCommand()) return interaction.reply(buildAdminPanel(interaction.guildId));
     // 이미 떠 있는 메시지를 고치는 응답(v2 표시는 메시지에 이미 있어서 components 만 보낸다)
@@ -640,7 +642,9 @@ async function handleAdminInteraction(interaction) {
         console.log(`[소식] 메시지 ${id} 삭제 (by ${interaction.user.tag})`);
         return edit('🗑️ 삭제했습니다. 같은 글은 다시 올라오지 않아요.');
     }
-    // 테스트: 무엇을 올릴지 고른다(테스트 서버에서만)
+    // 테스트 항목은 테스트 서버에서만(버튼도 거기서만 보이지만, 오래된 메시지의 버튼 등 다른 경로도 막는다)
+    if (interaction.customId.startsWith('admin_test') && interaction.guildId !== NEWS_TEST_GUILD_ID) return interaction.reply(adminNotice('테스트는 테스트 서버에서만 쓸 수 있습니다.'));
+    // 테스트: 무엇을 올릴지 고른다
     if (interaction.customId === 'admin_test') {
         return interaction.reply(adminNotice(`🧪 <#${NEWS_TEST_CHANNEL_ID}> 에 올릴 테스트를 고르세요. 실제 알림 기록에는 영향이 없어요.`, [new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('admin_test_samples').setLabel('임베드 샘플').setStyle(ButtonStyle.Secondary),
