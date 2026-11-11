@@ -6,7 +6,7 @@ const path = require('path');
 const token = process.env.DISCORD_TOKEN;
 const { Agent, request } = require('undici');
 const { flushAll, createStore } = require('./store');
-const { startNewsWatcher } = require('./news/watcher');
+const { startNewsWatcher, buildSources, previewSamples, previewRecent, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID } = require('./news/watcher');
 const { decideAccess, canToggleLock } = require('./card-lock');
 
 // 디스코드 API 연결을 60초까지 유지한다. 기본값(약 4초)이면 잠깐만 안 써도 연결이 끊겨서
@@ -33,9 +33,16 @@ function warmConnection() {
 setInterval(warmConnection, WARM_INTERVAL_MS).unref();
 warmConnection();
 
-// 폐기한 레이드 명령어(/퀘스트·/장비)가 등록돼 있던 서버. 시작할 때 이 서버의 서버 전용 명령어를 비워 목록에서 지운다.
-// (모두 지워진 걸 확인한 뒤에는 이 상수와 아래 정리 코드를 함께 없애도 된다)
-const LEGACY_COMMAND_GUILDS = ['1282694117255548960']; // 테스트 서버
+// 테스트 서버(NEWS_TEST_GUILD_ID)에서만 쓰는 임시 명령어. 시작할 때 이 서버의 서버 전용 목록을 아래 내용으로 덮어쓰므로
+// 폐기한 /퀘스트·/장비도 함께 지워지고, 다른 서버의 명령어 목록에는 보이지 않는다.
+const TEST_GUILD_COMMANDS = [{
+    name: '소식테스트',
+    description: '[테스트] 소식 알림의 모든 임베드 모양과 최근 소식을 테스트 채널에 올립니다.',
+    options: [{
+        type: 3, name: '종류', description: '무엇을 올릴지(기본: 둘 다)',
+        choices: [{ name: '모든 임베드 샘플', value: 'samples' }, { name: '최근 실제 소식', value: 'recent' }, { name: '둘 다', value: 'both' }],
+    }],
+}];
 
 // 응답이 느릴 때 원인을 볼 수 있도록 기록하는 기준 (디스코드 응답 제한은 3초)
 const SLOW_RESPONSE_MS = 1500;
@@ -452,11 +459,9 @@ client.once(Events.ClientReady, async c => {
         await rest.put(Routes.applicationCommands(c.user.id), {
             body: [{ name: '몬스터', description: '몬스터 목록을 열고 정보를 확인합니다.' }]
         });
-        // 폐기한 레이드 명령어를 서버 전용 목록에서 지운다
-        for (const guildId of LEGACY_COMMAND_GUILDS) {
-            await rest.put(Routes.applicationGuildCommands(c.user.id, guildId), { body: [] })
-                .catch(e => console.error(`[옛 명령어 정리 실패] ${guildId}:`, e.code || '', e.message));
-        }
+        // 테스트 서버 전용 명령어 등록(이 서버 목록을 덮어써서 폐기한 레이드 명령어도 지운다)
+        await rest.put(Routes.applicationGuildCommands(c.user.id, NEWS_TEST_GUILD_ID), { body: TEST_GUILD_COMMANDS })
+            .catch(e => console.error(`[테스트 서버 명령어 등록 실패] ${NEWS_TEST_GUILD_ID}:`, e.code || '', e.message));
     } catch (e) { console.error(e); }
     startNewsWatcher(c, createStore('news', {})); // 와일즈 소식(공식 패치노트·캡콤아시아 유튜브·디시 제보) 자동 공지
 });
@@ -516,7 +521,41 @@ function getCardPost(interaction) {
 }
 const CARD_TABS = new Set(['basic', 'hitzone', 'drop', 'status', 'dropLow', 'dropHigh']);
 
+// /소식테스트 (임시, 테스트 서버 전용): 모든 임베드 모양 샘플과 최근 실제 소식을 테스트 채널에 올린다. 운영 기록은 건드리지 않는다.
+let newsPreviewRunning = false;
+async function runNewsPreview(interaction) {
+    if (interaction.guildId !== NEWS_TEST_GUILD_ID) {
+        return interaction.reply({ content: '이 명령어는 테스트 서버에서만 쓸 수 있습니다.', flags: MessageFlags.Ephemeral });
+    }
+    if (newsPreviewRunning) return interaction.reply({ content: '이미 올리는 중입니다. 끝난 뒤에 다시 실행해 주세요.', flags: MessageFlags.Ephemeral });
+    newsPreviewRunning = true;
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+        const mode = interaction.options.getString('종류') ?? 'both';
+        const channel = await client.channels.fetch(NEWS_TEST_CHANNEL_ID);
+        if (!channel?.isTextBased()) throw new Error(`테스트 채널을 찾을 수 없음(${NEWS_TEST_CHANNEL_ID})`);
+        const emojiIds = await fetchEmojiIds(client);
+        const post = async p => (await channel.send(p)).id;
+        const edit = async (id, p) => (await channel.messages.fetch(id)).edit(p);
+        const done = [];
+        if (mode !== 'recent') {
+            const r = await previewSamples({ sources: buildSources({ YOUTUBE_API_KEY: 'sample' }), post, edit, emojiIds });
+            done.push(`임베드 샘플 ${r.samples}종`);
+        }
+        if (mode !== 'samples') {
+            const r = await previewRecent({ sources: buildSources(process.env), post, emojiIds });
+            done.push(`최근 실제 소식 ${r.posted}개${r.errors.length ? ` (읽기 실패: ${r.errors.join(', ')})` : ''}`);
+        }
+        await interaction.editReply(`<#${NEWS_TEST_CHANNEL_ID}> 에 올렸습니다 — ${done.join(' · ')}`);
+    } catch (e) {
+        await interaction.editReply(`실패: ${e.message}`).catch(() => {});
+    } finally {
+        newsPreviewRunning = false;
+    }
+}
+
 async function handleInteraction(interaction) {
+    if (interaction.isChatInputCommand() && interaction.commandName === '소식테스트') return runNewsPreview(interaction);
     if (interaction.isChatInputCommand() && interaction.commandName === '몬스터') {
         if (isCooldownActive(interaction)) return;
         return openPrivateList(interaction, 0, 'auto');

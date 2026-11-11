@@ -85,12 +85,13 @@ function buildSources(env = process.env) {
         {
             id: 'dc', pollMs: 2 * 60_000, maxFresh: 10, maxAgeMs: 36 * 60 * 60_000, label: '몬스터헌터 시리즈 갤러리 ⓜ',
             load: async () => parse.parseDcList(await fetchText(DC_LIST)),
-            decide: async e => {
+            decide: async (e, io = {}) => {
+                const getHtml = io.fetchText ?? fetchText;   // 테스트 미리보기에서는 가짜 본문을 넣어 같은 코드를 통과시킨다
                 const c = parse.classifyTitle(e.title);
                 if (c.action === 'skip') return { include: false, reason: c.reason };
                 const isPatch = c.action === 'include' && c.kind.id === 'patch';
                 // 행사 글(와일즈 참여 확인)과 패치노트 글(공식 링크 확인)만 원글 본문을 읽는다
-                const html = c.action === 'checkBody' || isPatch ? await fetchText(e.url) : null;
+                const html = c.action === 'checkBody' || isPatch ? await getHtml(e.url) : null;
                 if (c.action === 'checkBody') {
                     const r = parse.confirmBody(parse.parseDcBody(html));
                     if (!r.include) return { include: false, reason: r.reason };
@@ -381,4 +382,142 @@ function startNewsWatcher(client, store) {
     watcher.tick().catch(e => console.error('[소식] 확인 오류:', e));
 }
 
-module.exports = { startNewsWatcher, createWatcher, buildSources, buildPayload, NEWS_CHANNEL_ID, EMOJI_NAMES, EmptyListError };
+// ── 테스트용 미리보기(임시) ─────────────────────────────────────────────────────
+// 테스트 서버에서만 쓴다. 각 출처의 최근 소식 중 알림 대상인 것을 골라 실제와 같은 카드로 테스트 채널에 올린다.
+// 운영 기록(알린 글·버전·카드)은 읽지도 쓰지도 않으므로 몇 번을 돌려도 실제 알림에 영향이 없다.
+const NEWS_TEST_GUILD_ID = '1282694117255548960';
+const NEWS_TEST_CHANNEL_ID = '1282694117255548963';
+
+// 출처별로 가장 최근 소식 중 알림 대상(include)인 것을 최대 perSource개씩 모은다. 읽기에 실패한 출처는 error 로 남긴다.
+async function collectRecent(sources, perSource = 3) {
+    const items = [];
+    for (const source of sources) {
+        let entries;
+        try { entries = await source.load(); } catch (err) { items.push({ source, error: err.message }); continue; }
+        let n = 0;
+        for (const entry of [...entries].sort((a, b) => (b.at ?? 0) - (a.at ?? 0))) {
+            if (n >= perSource) break;
+            let verdict;
+            try { verdict = await source.decide(entry); } catch { continue; }
+            if (verdict?.include) { items.push({ source, entry, verdict }); n++; }
+        }
+    }
+    return items;
+}
+
+// post(payload): 메시지 하나를 올리는 함수. 시간순(오래된 것 먼저)으로 올려 가장 최근 소식이 맨 아래에 오게 한다.
+async function previewRecent({ sources, post, emojiIds = {}, perSource = 3 }) {
+    const items = await collectRecent(sources, perSource);
+    const cards = items.filter(i => i.entry).sort((a, b) => (a.entry.at ?? 0) - (b.entry.at ?? 0));
+    const errors = items.filter(i => i.error);
+    await post({ content: `-# 테스트 미리보기 · 출처별 최근 소식 ${cards.length}개 (실제 알림과 같은 모양, 운영 기록과 무관)`, allowedMentions: { parse: [] } });
+    for (const { source, entry, verdict } of cards) await post(buildPayload(source, entry, verdict, emojiIds));
+    return { posted: cards.length, errors: errors.map(e => `${e.source.label}: ${e.error}`), perSource: Object.fromEntries(sources.map(s => [s.id, cards.filter(c => c.source.id === s.id).length])) };
+}
+
+// 봇의 애플리케이션 이모지를 이름으로 찾아 { 출처id: 이모지ID } 표를 만든다(없으면 빈 표 → 기본 모양)
+async function fetchEmojiIds(client) {
+    try {
+        const list = await client.application.emojis.fetch();
+        const byName = new Map([...list.values()].map(e => [e.name, e.id]));
+        return Object.fromEntries(Object.entries(EMOJI_NAMES).filter(([, name]) => byName.has(name)).map(([src, name]) => [src, byName.get(name)]));
+    } catch { return {}; }
+}
+
+// 모든 카드 종류의 샘플. 실제 판정(decide)을 그대로 통과시켜 만들므로 실제 알림과 같은 모양이 나온다.
+// sources 에는 유튜브를 포함한 buildSources({ YOUTUBE_API_KEY: 'sample' }) 결과를 넘긴다(샘플은 네트워크를 쓰지 않음).
+async function buildSamples(sources, now = Date.now()) {
+    const by = Object.fromEntries(sources.map(s => [s.id, s]));
+    const samples = [];
+    const add = async (label, id, entry, io) => {
+        const source = by[id];
+        if (!source) return null;
+        const verdict = await source.decide(entry, io);
+        if (!verdict?.include) return null;
+        const sample = { label, source, entry, verdict };
+        samples.push(sample);
+        return sample;
+    };
+    const ago = m => now - m * 60_000;
+    const DC_URL = 'https://gall.dcinside.com/mgallery/board/view/?id=capcommh&no=1522725'; // 실제 글(버튼을 눌러도 열리도록)
+    const dcEntry = (title, mins) => ({ key: 'dc-sample', title, url: DC_URL, at: ago(mins), num: 1 });
+    const dcHtml = inner => `<div class="write_div"><div>${inner}</div></div><div class="btn_recommend_box"></div>`;
+    const io = html => ({ fetchText: async () => html });
+
+    // 공식(스팀 한국어 공지)
+    const ev = (gid, name, body, mins) => ({ gid, event_name: name, rtime32_start_time: Math.floor(ago(mins) / 1000), announcement_body: { body } });
+    const steam = parse.parseSteamEvents(JSON.stringify({ events: [
+        ev('s1', '업데이트 개요 (Ver.1.043.00.00)', ['[h2][b]배포일[/b][/h2]', '[b]2026년 11월 12일(목)[/b]', '[h2][b]주요 추가 요소 / 사양 변경[/b][/h2]', '[h2][b]오류 수정 / 게임 밸런스 조정 외[/b][/h2]', '[list]', '[*] 일부 AMD 그래픽 카드에서 강제 종료 현상을 개선했습니다', '[*] 일부 통신 환경에서 통신 오류를 개선했습니다', '[*] 일부 무기의 모션 값을 조정했습니다', '[/list]'].join('\n'), 30),
+        ev('s2', '업데이트 개요 (Ver.1.044)', ['[h2][b]배포일[/b][/h2]', '[b]2026년 12월 3일(목)[/b]', '[h2][b]주요 추가 요소 / 사양 변경[/b][/h2]', '[h2][b]오류 수정 / 게임 밸런스 조정 외[/b][/h2]', '[h3][b]【거점 / 시설 관련】[/b][/h3]', '[h3][b]【몬스터 관련】[/b][/h3]', '[h3][b]【플레이어 관련】[/b][/h3]'].join('\n'), 60),
+        ev('s3', '업데이트 Ver1.044 점검 안내', '점검 기간 2026년 12월 3일(목) 10:00 ~ 12:30', 90),
+        ev('s4', 'Update Summary (Ver.1.043.00.01)', 'English only body', 120),
+    ] }));
+    await add('공식 · 패치노트 (수정 내용 목록)', 'official', steam[0]);
+    await add('공식 · 큰 업데이트 (변경 분야 표시)', 'official', steam[1]);
+    await add('공식 · 점검 안내', 'official', steam[2]);
+    await add('공식 · 영문 공지를 한글 제목으로 (본문 없음)', 'official', steam[3]);
+
+    // 디시(제목으로 분류하고, 패치노트·행사 글은 본문을 열어 확인)
+    const OFF_LINK = 'https://info.monsterhunter.com/wilds/update/ko-kr/Ver.1.042.00.03.html';
+    await add('디시 · 점검 예고', 'dc', dcEntry('내일 오전 10시 와일즈 점검 및 패치 예정.jpg', 45));
+    await add('디시 · 패치노트 (사진뿐 → 디시 제보로 표기)', 'dc', dcEntry('Ver.1.043 패치노트.jpg', 40), io(dcHtml('<img src="a.jpg">')));
+    const official = await add('디시 · 패치노트 (공식 링크 확인 → 공식으로 표기)', 'dc', dcEntry('Ver.1.042.00.03 패치노트 공개', 35), io(dcHtml(`공식 페이지 ${OFF_LINK} 입니다 확인해 보세요 감사합니다`)));
+    await add('디시 · 행사 참여 (본문에서 와일즈·어센던스 참여 확인)', 'dc', dcEntry('파리 게임 위크 공식 일정 안내.jpg', 50), io(dcHtml('몬스터헌터 어센던스 보스 챌린지 진행자 안내 개발자 프레젠테이션 일정 정리입니다')));
+    await add('디시 · 신규 콘텐츠', 'dc', dcEntry('어센던스 신규 소형몹 "간드론"', 55));
+    await add('디시 · 일반 소식', 'dc', dcEntry('몬헌 와일즈 사냥왕 결정전 챔피언십 우승자.jpg', 65));
+
+    // 유튜브(일반 메시지 + 영상 임베드)
+    const yt = parse.parseYoutubePlaylist(JSON.stringify({ items: [{ snippet: { title: '몬스터헌터 와일즈 어센던스 - 무기 소개 영상: 건랜스', publishedAt: new Date(ago(20)).toISOString(), resourceId: { videoId: 'rVIKWBd_280' } } }] }));
+    await add('유튜브 · 새 영상 (영상 임베드)', 'youtube', yt[0]);
+
+    // REFramework
+    const gh = parse.parseGithubReleases(JSON.stringify([
+        { id: 11, name: 'REF Nightly 01438', tag_name: 'nightly-01438', html_url: 'https://github.com/praydog/REFramework-nightly/releases', published_at: new Date(ago(10)).toISOString(), prerelease: true, draft: false, body: '## Changes\n- Fix crash on RE Engine games\n- Update offsets' },
+        { id: 12, name: 'REF Release 1.5.8', tag_name: 'v1.5.8', html_url: 'https://github.com/praydog/REFramework-nightly/releases', published_at: new Date(ago(15)).toISOString(), prerelease: false, draft: false, body: '' },
+    ]));
+    await add('REFramework · 새 릴리즈 (프리릴리즈, 변경 내용 있음)', 'reframework', gh[0]);
+    await add('REFramework · 새 릴리즈 (정식, 설명 없음)', 'reframework', gh[1]);
+
+    return { samples, officialSample: official, steamDetail: steam[0] ? { entry: steam[0], verdict: await by.official.decide(steam[0]) } : null };
+}
+
+// 모든 임베드 종류를 테스트 채널에 올린다. edit 가 있으면 "한 카드가 제보 → 공식 링크 → 스팀 상세로 바뀌는 흐름"도 보여 준다.
+async function previewSamples({ sources, post, edit, emojiIds = {}, wait = ms => new Promise(r => setTimeout(r, ms)), now = Date.now() }) {
+    const { samples, officialSample, steamDetail } = await buildSamples(sources, now);
+    const fallback = samples.find(s => s.source.id === 'official');
+    const canFlow = !!(edit && officialSample && steamDetail);
+    const total = samples.length + (fallback ? 1 : 0) + (canFlow ? 1 : 0);
+    await post({ content: `-# 테스트 미리보기 · 모든 알림 모양 샘플 (실제 판정 코드를 통과시켜 만든 가짜 소식, 운영 기록과 무관)`, allowedMentions: { parse: [] } });
+    let n = 0;
+    for (const s of samples) {
+        n++;
+        await post({ content: `-# 샘플 ${n}/${total} · ${s.label}`, allowedMentions: { parse: [] } });
+        await post(buildPayload(s.source, s.entry, s.verdict, emojiIds));
+    }
+    // 봇 이모지가 없을 때(등록 전) 보이는 기본 모양
+    if (fallback) {
+        n++;
+        await post({ content: `-# 샘플 ${n}/${total} · 봇 이모지가 없을 때의 기본 모양 (공식 카드)`, allowedMentions: { parse: [] } });
+        await post(buildPayload(fallback.source, fallback.entry, fallback.verdict, {}));
+    }
+    // 한 카드가 단계적으로 바뀌는 흐름(같은 메시지를 수정)
+    let lifecycle = false;
+    if (canFlow) {
+        n++;
+        await post({ content: `-# 샘플 ${n}/${total} · 한 카드가 바뀌는 흐름: 제보 → 공식 링크 확인 → 스팀 상세 (같은 메시지를 4초 간격으로 수정)`, allowedMentions: { parse: [] } });
+        const fan = { ...officialSample.verdict, title: undefined, sourceLabel: undefined, emojiSource: undefined, url: undefined, note: undefined };
+        const id = await post(buildPayload(officialSample.source, { ...officialSample.entry, title: 'Ver.1.042.00.03 패치 예정.jpg' }, fan, emojiIds));
+        await wait(4000);
+        await edit(id, buildPayload(officialSample.source, officialSample.entry, officialSample.verdict, emojiIds));
+        await wait(4000);
+        const official = sources.find(s => s.id === 'official');
+        await edit(id, buildPayload(official, steamDetail.entry, { ...steamDetail.verdict, url: officialSample.verdict.url }, emojiIds));
+        lifecycle = true;
+    }
+    return { samples: samples.length + (fallback ? 1 : 0) + (lifecycle ? 1 : 0), labels: samples.map(s => s.label) };
+}
+
+module.exports = {
+    startNewsWatcher, createWatcher, buildSources, buildPayload, NEWS_CHANNEL_ID, EMOJI_NAMES, EmptyListError,
+    collectRecent, previewRecent, previewSamples, buildSamples, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID,
+};

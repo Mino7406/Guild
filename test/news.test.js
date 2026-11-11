@@ -107,6 +107,60 @@ test('요청이 실패하면 오류 사유를 짧게 덧붙이고, JSON 이 아�
     } finally { global.fetch = realFetch; }
 });
 
+test('테스트 미리보기: 출처별 최근 알림 대상만 시간순으로 올리고, 운영 기록은 건드리지 않는다', async () => {
+    const { previewRecent, collectRecent } = require('../news/watcher');
+    const mkSrc = (id, label, entries, decide, fail = false) => ({ id, label, load: async () => { if (fail) throw new Error('HTTP 403'); return entries; }, decide });
+    const kind = { id: 'patch', label: '패치노트', emoji: 'E' };
+    const yes = () => ({ include: true, kind });
+    const e = (key, title, at) => ({ key, title, url: 'https://x/' + key, at, tags: [], summary: '' });
+    const a = mkSrc('official', 'A', [e('1', '가', 100), e('2', '나', 300), e('3', '다', 200), e('4', '라', 400)], ent => ent.key === '4' ? { include: false } : yes());
+    const b = mkSrc('dc', 'B', [e('5', '마', 250)], yes);
+    const c = mkSrc('reframework', 'C', [], yes, true);          // 읽기 실패
+    const posts = [];
+    const r = await previewRecent({ sources: [a, b, c], post: async p => { posts.push(p); }, perSource: 2 });
+    // A: 가장 최근 대상 2개(나300, 다200), B: 1개(마250) → 시간순 다200, 마250, 나300
+    assert.equal(r.posted, 3);
+    assert.deepEqual(r.perSource, { official: 2, dc: 1, reframework: 0 });
+    assert.deepEqual(r.errors, ['C: HTTP 403']);
+    assert.equal(posts.length, 4);                              // 안내 1 + 카드 3
+    assert.match(posts[0].content, /테스트 미리보기/);
+    const titles = posts.slice(1).map(p => JSON.stringify(p.components[0].toJSON()).match(/### ([^"\\]+)/)[1]);
+    assert.deepEqual(titles, ['다', '마', '나']);
+    assert.equal((await collectRecent([a], 1)).length, 1);
+});
+
+test('테스트 미리보기: 모든 임베드 종류 샘플을 만들고(실제 판정 통과), 한 카드가 바뀌는 흐름도 보여 준다', async () => {
+    const { previewSamples, buildSamples } = require('../news/watcher');
+    const sources = buildSources({ YOUTUBE_API_KEY: 'sample' });
+    const { samples } = await buildSamples(sources);
+    const labels = samples.map(s => s.label);
+    // 출처마다, 카드 종류마다 샘플이 있어야 한다
+    for (const part of ['공식 · 패치노트', '공식 · 큰 업데이트', '공식 · 점검 안내', '공식 · 영문', '디시 · 점검 예고', '사진뿐', '공식 링크 확인', '행사 참여', '디시 · 신규 콘텐츠', '디시 · 일반 소식', '유튜브', '프리릴리즈', '정식']) {
+        assert.ok(labels.some(l => l.includes(part)), `샘플 없음: ${part}`);
+    }
+    const posts = [], edits = [];
+    const r = await previewSamples({ sources, post: async p => { posts.push(p); return 'm' + posts.length; }, edit: async (id, p) => { edits.push({ id, p }); }, wait: async () => {}, emojiIds: { official: '1', dc: '2', youtube: '3', reframework: '4' } });
+    assert.equal(r.samples, samples.length + 2);              // 샘플 + 이모지 없는 기본 모양 + 흐름
+    assert.equal(edits.length, 2);                            // 제보 → 공식 링크 → 스팀 상세
+    assert.equal(edits[0].id, edits[1].id);                   // 같은 메시지를 수정
+    // 안내 글과 카드가 번갈아 올라간다(안내는 일반 메시지, 카드는 컴포넌트 v2)
+    const cards = posts.filter(p => p.components);
+    const notes = posts.filter(p => p.content !== undefined);
+    // 카드 = 샘플 중 유튜브(일반 메시지)를 뺀 것 + 이모지 없는 기본 모양 + 흐름의 첫 카드
+    assert.equal(cards.length, samples.length - 1 + 2);
+    assert.ok(notes.length >= samples.length + 3);
+    // 유튜브 샘플은 영상 임베드용 일반 메시지(링크 포함)
+    assert.ok(notes.some(p => p.content.includes('https://www.youtube.com/watch?v=rVIKWBd_280')));
+    // 공식 링크 확인 샘플은 버튼이 공식 페이지로, 사진뿐 샘플은 디시 원글로 간다
+    const btn = c => { const o = []; (function w(x) { if (!x || typeof x !== 'object') return; if (x.url && x.label) o.push(x); Object.values(x).forEach(w); })(c.components[0].toJSON()); return o[0]; };
+    const byLabel = part => samples.findIndex(s => s.label.includes(part));
+    const linkCard = buildPayload(samples[byLabel('공식 링크 확인')].source, samples[byLabel('공식 링크 확인')].entry, samples[byLabel('공식 링크 확인')].verdict, {});
+    assert.match(btn(linkCard).url, /info\.monsterhunter\.com\/wilds\/update\/ko-kr\/Ver\.1\.042\.00\.03\.html/);
+    const photoCard = buildPayload(samples[byLabel('사진뿐')].source, samples[byLabel('사진뿐')].entry, samples[byLabel('사진뿐')].verdict, {});
+    assert.match(btn(photoCard).url, /gall\.dcinside\.com/);
+    assert.equal(btn(photoCard).label, '내용 보기');
+});
+
 test('모든 카드의 버튼은 하나이고 이름은 "내용 보기"로 통일(디시 원글 버튼 없음)', () => {
     const sources = Object.fromEntries(buildSources({ YOUTUBE_API_KEY: 'k' }).map(s => [s.id, s]));
     const walkButtons = payload => { const out = []; (function walk(x) { if (!x || typeof x !== 'object') return; if (x.url && x.label) out.push(x); Object.values(x).forEach(walk); })(payload.components[0].toJSON()); return out; };
