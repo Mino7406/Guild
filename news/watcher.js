@@ -143,7 +143,13 @@ function buildSources(env = process.env) {
     sources.splice(sources.indexOf(dcSource) + 1, 0, {
         ...dcSource, id: 'dcbest', pollMs: 5 * 60_000, maxFresh: 5, seedAnnounceMs: 12 * 60 * 60_000,
         load: async () => parse.parseDcList(await fetchText(DC_BEST_LIST)),
-        decide: async (e, io) => { const v = await dcSource.decide(e, io); return v.include ? { ...v, emojiSource: v.emojiSource ?? 'dc' } : v; },
+        decide: async (e, io) => {
+            const v = await dcSource.decide(e, io);
+            if (!v.include) return v;
+            // 개념글에는 잡담·토론도 많아서, 점검·패치·신규 콘텐츠·행사처럼 소식 키워드로 분류되는 글만 올린다('일반 소식'으로만 분류되는 글은 제외)
+            if (v.kind?.id === 'news') return { include: false, reason: '개념글이지만 소식 키워드 없음' };
+            return { ...v, emojiSource: v.emojiSource ?? 'dc' };
+        },
     });
     // REFramework 새 릴리즈: 와일즈 모드 도구라 새 빌드가 나오면 바로 알린다. 다른 출처와 겹칠 일이 없어 중복 검사는 하지 않는다.
     // (GitHub 무인증 한도는 시간당 60회 — 5분마다 확인하면 12회)
