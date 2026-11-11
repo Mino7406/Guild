@@ -264,6 +264,20 @@ test('11 GitHub: 초안은 제외하고 새 릴리즈 2개는 시간순으로 �
     record('REFramework 릴리즈 2개 + 초안', '초안 제외, 시간순으로 카드 2개', true);
 });
 
+test('05b 다른 출처가 같은 소식을 며칠 뒤에 올려도 다시 올리지 않는다', async () => {
+    const { w } = setup({ init: baseInit() });
+    await run(w, 12);
+    routes.yt = ytJson([['g1', '몬스터헌터 와일즈 어센던스 게임스컴 참여 일정 공개', clock.t - 1 * MIN], ['old1', '몬스터헌터 와일즈 어센던스 - 1st 트레일러', T0 - 86400e3]]);
+    await run(w, 6);
+    assert.equal(sent.length, 1);
+    clock.t += 3 * 24 * 60 * MIN;   // 3일 뒤
+    routes.dcView = { '301': dcView('게임스컴 어센던스 참여 일정 몬스터헌터 어센던스 방송 안내 시청 부탁드립니다 감사합니다') };
+    routes.dc = dcHtml([[301, '와일즈 어센던스 게임스컴 참여 일정 안내', clock.t - 1 * MIN], [100, '기존 와일즈 글', T0 - 3600e3], [99, '아웃랜더스 기존 글', T0 - 7200e3]]);
+    await run(w, 10);
+    assert.equal(sent.length, 1, '며칠 뒤 다른 출처의 같은 소식이 또 올라갔음');
+    record('며칠 뒤 재탕 방지', '3일 뒤 다른 출처가 같은 소식을 올려도 건너뜀', true);
+});
+
 test('12 봇을 재시작해도(저장 기록 유지) 같은 소식을 다시 올리지 않는다', async () => {
     const { w, store } = setup({ init: baseInit() });
     await run(w, 12);

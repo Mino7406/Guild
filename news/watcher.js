@@ -31,8 +31,8 @@ const MAX_BACKOFF = 6;
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_BODY_CHARS = 3_000_000;
 const MAX_SEEN = 300;
-const RECENT_KEEP = 30;
-const RECENT_WINDOW_MS = 24 * 60 * 60_000;
+const RECENT_KEEP = 300;                         // 보낸 제목 기억(한 건에 수십 바이트라 부담 없음)
+const RECENT_WINDOW_MS = 14 * 24 * 60 * 60_000;  // 출처가 달라도 2주 안에 같은 소식이 다시 올라오면 올리지 않는다(다음날·며칠 뒤 재탕 방지)
 const ACCENT = 0xd9822b;
 const OFFICIAL_THUMB = 'https://info.monsterhunter.com/wilds/update/assets/images/share.png';
 
@@ -206,7 +206,7 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
     state.versions ??= [];   // 이미 알린 패치 버전(디시에서 같은 버전을 여러 사람이 올려도 한 번만 알리기 위해)
     const runtime = new Map(sources.map((s, i) => [s.id, { nextAt: now() + i * STAGGER_MS, fails: 0 }]));
 
-    // 다른 출처가 최근 24시간 안에 올린 카드와 제목이 많이 겹치면 같은 소식으로 본다.
+    // 다른 출처가 최근 2주 안에 올린 카드와 제목이 많이 겹치면 같은 소식으로 본다.
     // 같은 출처끼리는 비교하지 않는다(연속된 무기 소개 영상·연속된 패치 버전을 같은 소식으로 오인하지 않도록).
     // sameSource: 같은 출처끼리도 비교한다. 버전 번호가 없는 디시 글(같은 점검 예고를 여러 사람이 올리는 경우)에만 쓴다.
     // 제목에 버전 번호가 있으면 숫자만 다른 제목(Ver.1.042.00.01 / .02)을 같은 소식으로 오인하므로 버전 규칙으로만 판별한다.
