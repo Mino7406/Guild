@@ -233,6 +233,7 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
     state.versions ??= [];   // 이미 알린 패치 버전(디시에서 같은 버전을 여러 사람이 올려도 한 번만 알리기 위해)
     // 점검용 기록(/관리 패널에 표시): 출처별 마지막 성공/실패 시각·연속 실패 횟수, 날짜별 올린 소식 수
     state.stats ??= { sources: {}, days: {} };
+    state.posted ??= [];     // 최근에 올린 소식(메시지 id·제목) — /관리에서 잘못 올라온 소식을 골라 지우는 데 쓴다
     const dayKey = () => new Date(now() + 9 * 3600_000).toISOString().slice(0, 10); // 한국 날짜
     const runtime = new Map(sources.map((s, i) => [s.id, { nextAt: now() + i * STAGGER_MS, fails: 0 }]));
 
@@ -368,6 +369,7 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
                     delete verdict.image;
                 }
                 const messageId = await send(source, e, verdict);
+                if (messageId) state.posted = [...state.posted, { id: messageId, title: String(verdict.title ?? e.title).slice(0, 80), label: source.label, at: now() }].slice(-25);
                 if (imgId) {
                     state.dcImages[imgId] = now();
                     for (const k of Object.keys(state.dcImages).slice(0, Math.max(0, Object.keys(state.dcImages).length - 300))) delete state.dcImages[k];
@@ -421,13 +423,22 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
             sources: sources.map(src => ({ id: src.id, label: src.label, ...state.stats.sources[src.id] })),
         };
     }
-    return { checkSource, tick, status };
+    // 잘못 올라온 소식 정리용: 최근 목록과, 지운 뒤 기록에서 빼기
+    const posts = () => [...state.posted].reverse();
+    function forget(id) {
+        state.posted = state.posted.filter(p => p.id !== id);
+        for (const [k, rec] of Object.entries(state.cards)) if (rec.id === id) delete state.cards[k];
+        store.save();
+    }
+    return { checkSource, tick, status, posts, forget };
 }
 
 // 같은 오류가 계속 나도 로그를 도배하지 않게 출처별로 1시간에 한 번만 남긴다.
 let timer = null;
 let currentWatcher = null;
 const getNewsStatus = () => currentWatcher?.status() ?? null;
+const getNewsPosts = () => currentWatcher?.posts() ?? [];
+const forgetNewsPost = id => currentWatcher?.forget(id);
 function startNewsWatcher(client, store, isPaused = () => false) {
     if (timer) return;
     const sources = buildSources();
@@ -627,6 +638,6 @@ async function previewSamples({ sources, post, edit, emojiIds = {}, wait = ms =>
 }
 
 module.exports = {
-    startNewsWatcher, getNewsStatus, createWatcher, buildSources, buildPayload, NEWS_CHANNEL_ID, EMOJI_NAMES, EmptyListError,
+    startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, createWatcher, buildSources, buildPayload, NEWS_CHANNEL_ID, EMOJI_NAMES, EmptyListError,
     collectRecent, previewRecent, previewSamples, buildSamples, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID,
 };

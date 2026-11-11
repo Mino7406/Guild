@@ -1,12 +1,12 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Events, REST, Routes, ActionRowBuilder, ButtonBuilder, ButtonStyle, Collection, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, SectionBuilder, ThumbnailBuilder, MessageFlags, resolveColor, ActivityType, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Events, REST, Routes, ActionRowBuilder, ButtonBuilder, ButtonStyle, Collection, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, SectionBuilder, ThumbnailBuilder, MessageFlags, resolveColor, ActivityType, EmbedBuilder, StringSelectMenuBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
 const token = process.env.DISCORD_TOKEN;
 const { Agent, request } = require('undici');
 const { flushAll, createStore } = require('./store');
-const { startNewsWatcher, getNewsStatus, buildSources, previewSamples, previewRecent, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID } = require('./news/watcher');
+const { startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, NEWS_CHANNEL_ID, buildSources, previewSamples, previewRecent, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID } = require('./news/watcher');
 const { decideAccess, canToggleLock } = require('./card-lock');
 
 // 디스코드 API 연결을 60초까지 유지한다. 기본값(약 4초)이면 잠깐만 안 써도 연결이 끊겨서
@@ -552,6 +552,9 @@ function buildAdminPanel() {
             new ButtonBuilder().setCustomId('admin_toggle').setLabel(paused ? '소식 재개' : '소식 일시정지').setEmoji(paused ? '▶️' : '⏸️').setStyle(paused ? ButtonStyle.Success : ButtonStyle.Danger)
         ),
         new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('admin_delete').setLabel('잘못 올라온 소식 삭제').setEmoji('🗑️').setStyle(ButtonStyle.Secondary)
+        ),
+        new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('admin_test_samples').setLabel('임베드 샘플').setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('admin_test_recent').setLabel('최근 실제 소식').setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('admin_test_both').setLabel('둘 다').setStyle(ButtonStyle.Primary)
@@ -588,6 +591,19 @@ async function runNewsPreview(interaction, mode) {
     }
 }
 
+// 최근에 올린 소식 목록(최대 25개)을 고르는 메뉴
+function buildDeleteList() {
+    const posts = getNewsPosts();
+    if (!posts.length) return { content: '지울 수 있는 최근 소식이 없습니다. (이번 업데이트 이후 올라온 소식부터 목록에 나와요)', components: [] };
+    return {
+        content: '지울 소식을 고르세요.',
+        components: [new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder().setCustomId('admin_pick').setPlaceholder('최근 올라온 소식')
+                .addOptions(posts.map(p => ({ label: p.title.slice(0, 100) || '(제목 없음)', description: `${p.label} · ${new Date(p.at + 9 * 3600_000).toISOString().slice(5, 16).replace('T', ' ')}`.slice(0, 100), value: p.id })))
+        )],
+    };
+}
+
 async function handleAdminInteraction(interaction) {
     if (interaction.guildId !== NEWS_TEST_GUILD_ID) {
         return interaction.reply({ content: '이 기능은 테스트 서버에서만 쓸 수 있습니다.', flags: MessageFlags.Ephemeral });
@@ -603,13 +619,41 @@ async function handleAdminInteraction(interaction) {
         return interaction.update(buildAdminPanel());
     }
     if (interaction.customId === 'admin_refresh') return interaction.update(buildAdminPanel());
+    // 잘못 올라온 소식 삭제: 목록에서 고르고 → 확인 → 채널에서 메시지를 지운다
+    if (interaction.customId === 'admin_delete') return interaction.reply({ ...buildDeleteList(), flags: MessageFlags.Ephemeral });
+    if (interaction.customId === 'admin_pick') {
+        const id = interaction.values[0];
+        const post = getNewsPosts().find(p => p.id === id);
+        if (!post) return interaction.update({ content: '이미 지워졌거나 목록에 없는 소식입니다.', embeds: [], components: [] });
+        return interaction.update({
+            content: `이 소식을 지울까요? 되돌릴 수 없어요.
+**${post.title}** (${post.label})`,
+            components: [new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(`admin_delok_${id}`).setLabel('삭제').setStyle(ButtonStyle.Danger),
+                new ButtonBuilder().setCustomId('admin_delcancel').setLabel('취소').setStyle(ButtonStyle.Secondary),
+            )],
+        });
+    }
+    if (interaction.customId === 'admin_delcancel') return interaction.update({ content: '취소했습니다.', components: [] });
+    if (interaction.customId.startsWith('admin_delok_')) {
+        const id = interaction.customId.slice('admin_delok_'.length);
+        try {
+            const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
+            await channel.messages.delete(id);
+        } catch (e) {
+            if (e.code !== 10008) return interaction.update({ content: `삭제 실패: ${e.message}`, components: [] }); // 10008: 이미 지워진 메시지는 기록만 정리
+        }
+        forgetNewsPost(id);
+        console.log(`[소식] 메시지 ${id} 삭제 (by ${interaction.user.tag})`);
+        return interaction.update({ content: '🗑️ 삭제했습니다. 같은 글은 다시 올라오지 않아요.', components: [] });
+    }
     const mode = interaction.customId.replace('admin_test_', '');
     if (['samples', 'recent', 'both'].includes(mode)) return runNewsPreview(interaction, mode);
 }
 
 async function handleInteraction(interaction) {
     if (interaction.isChatInputCommand() && interaction.commandName === '관리') return handleAdminInteraction(interaction);
-    if (interaction.isButton() && interaction.customId.startsWith('admin_')) return handleAdminInteraction(interaction);
+    if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('admin_')) return handleAdminInteraction(interaction);
     if (interaction.isChatInputCommand() && interaction.commandName === '몬스터') {
         if (isCooldownActive(interaction)) return;
         return openPrivateList(interaction, 0, 'auto');
