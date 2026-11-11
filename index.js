@@ -7,7 +7,8 @@ const token = process.env.DISCORD_TOKEN;
 const { Agent, request } = require('undici');
 const quest = require('./raid/quest');
 const { openEquipment, handleEquipmentSelect } = require('./raid/equipment');
-const { flushAll } = require('./raid/store');
+const { flushAll, createStore } = require('./raid/store');
+const { startNewsWatcher } = require('./news/watcher');
 const { decideAccess, canToggleLock } = require('./card-lock');
 
 // 디스코드 API 연결을 60초까지 유지한다. 기본값(약 4초)이면 잠깐만 안 써도 연결이 끊겨서
@@ -464,6 +465,7 @@ client.once(Events.ClientReady, async c => {
         }
     } catch (e) { console.error(e); }
     quest.init(c); // 재시작 전에 진행 중이던 퀘스트 이어가기
+    startNewsWatcher(c, createStore('news', {})); // 와일즈 소식(공식 패치노트·캡콤아시아 유튜브·디시 제보) 자동 공지
 });
 
 client.on(Events.MessageCreate, message => quest.noteChannelMessage(message));
