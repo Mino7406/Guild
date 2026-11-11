@@ -154,6 +154,20 @@ test('01c 개념글 출처: 공식 말머리 글이 개념글에도 올라와도
     record('개념글 중복 방지', '공식 말머리와 개념글에 모두 떠도 알림은 1개', true);
 });
 
+test('01e 개념글 출처: 본문을 못 읽으면(디시 일시 오류) 버리지 않고 보류했다가 읽히면 다시 판단한다', async () => {
+    const { w } = setup({ init: baseInit() });
+    await run(w, 12);
+    routes.dcBest = dcHtml([[601, '와일즈 서버 점검 안내 12월 5일', clock.t - 1 * MIN], [90, '오래된 와일즈 개념글', T0 - 40 * 3600e3]]);
+    routes.dcView = {};   // 본문 404
+    await run(w, 8);
+    assert.equal(sent.length, 0);
+    routes.dcView = { '601': dcView('공식 안내입니다 점검 시간은 아래 사진을 확인해 주세요 <iframe src="x"></iframe>') };
+    await run(w, 8);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].src, 'dcbest');
+    record('개념글 본문 읽기 실패 대비', '본문을 못 읽어도 글을 버리지 않고 다음에 다시 판단해 올림', true);
+});
+
 test('02 공식 새 버전이 올라오면 카드 1개, 다시 확인해도 중복 없음', async () => {
     const { w } = setup({ init: baseInit() });
     await run(w, 12);

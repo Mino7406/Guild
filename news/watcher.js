@@ -63,7 +63,8 @@ async function fetchText(url, headers = {}) {
 
 // 본문 근거(링크·첨부·글자 수) — 개념글 알림의 낚시글 거르기에 쓴다. 실패해도 판단만 못 할 뿐 알림 자체에는 영향이 없다.
 function evidenceOf(html) {
-    try { return parse.dcEvidence(html ?? ''); } catch { return null; }
+    if (!html) return null;   // 본문을 못 읽은 경우: 근거를 알 수 없음(빈 근거와 구분)
+    try { return parse.dcEvidence(html); } catch { return null; }
 }
 // 디시 원글의 첫 사진(있으면)과 작성자. 사진을 못 찾아도 알림 판단에는 영향이 없다.
 function imageOf(html) {
@@ -145,6 +146,7 @@ function buildSources(env = process.env) {
     // 디시 개념글: 공식 말머리 목록과 같은 분류 규칙을 쓰고, 같은 소식은 기존 중복 방지가 거른다.
     // 처음 켤 때 최근 12시간 안의 글은 '이미 본 글'로 치지 않고 규칙에 따라 판단한다(이번에 놓친 글을 알리기 위해).
     const dcSource = sources.find(x => x.id === 'dc');
+    const deferCount = new Map();   // 글별 보류 횟수
     sources.splice(sources.indexOf(dcSource) + 1, 0, {
         ...dcSource, id: 'dcbest', statusLabel: '몬스터헌터 시리즈 갤러리 ⓜ · 개념글', pollMs: 5 * 60_000, maxFresh: 5, seedAnnounceMs: 12 * 60 * 60_000,
         load: async () => parse.parseDcList(await fetchText(DC_BEST_LIST)),
@@ -153,10 +155,17 @@ function buildSources(env = process.env) {
             if (!v.include) return v;
             // 개념글에는 잡담·토론도 많아서, 점검·패치·신규 콘텐츠·행사처럼 소식 키워드로 분류되는 글만 올린다('일반 소식'으로만 분류되는 글은 제외)
             if (v.kind?.id === 'news') return { include: false, reason: '개념글이지만 소식 키워드 없음' };
-            // 어그로·잡담 제목이거나, 본문에 근거(공식 링크·이미지·영상)가 없거나 글이 너무 짧으면 제외
-            if (parse.NOISE_TITLE_RE.test(e.title)) return { include: false, reason: '어그로·잡담 제목' };
-            const ev = v.evidence;
-            if (!ev || (!ev.links.length && !ev.media) || ev.textLen < 15) return { include: false, reason: '근거(링크·사진·영상)나 내용이 부족' };
+            // 점수제: 공식 링크·공식) 제목·날짜가 있으면 가점, 잡담·어그로 말투나 근거 없음은 감점(자세한 기준은 parse.dcNewsScore). 기준 점수에 못 미치면 올리지 않는다.
+            // 본문을 읽지 못했으면(디시 일시 차단·오류) 근거를 알 수 없어 섣불리 버리지 않고 다음 확인 때 다시 판단한다(오래되면 나이 검사에서 포기).
+            if (!v.evidence) {
+                const n = (deferCount.get(e.key) ?? 0) + 1;
+                deferCount.set(e.key, n);
+                if (deferCount.size > 500) deferCount.delete(deferCount.keys().next().value);
+                return n <= 3 ? { include: false, defer: true, reason: '본문을 읽지 못해 보류' } : { include: false, reason: '본문을 계속 읽지 못해 제외(너무 큰 글 등)' };   // 큰 글을 5분마다 다시 받지 않도록 3번까지만
+            }
+            let r;
+            try { r = parse.dcNewsScore(e.title, v.evidence); } catch (err) { return { include: false, reason: `점수 계산 오류: ${err.message}` }; }   // 점수 계산이 터져도 다른 글 처리는 계속된다
+            if (!r.pass) return { include: false, reason: `개념글 점수 미달(${r.score}): ${r.reasons.join(', ')}` };
             return { ...v, emojiSource: v.emojiSource ?? 'dc' };
         },
     });

@@ -76,13 +76,48 @@ function dcPostInfo(html) {
     return { author, images };
 }
 
-// 개념글 알림용: 어그로·잡담 제목 패턴(웃음·욕설·감탄 자음, 낚시성 단어, 의견·질문·토론 글)
-const NOISE_TITLE_RE = /[ㅋㅎㄷㅠㅜㅗㅅㅂㅈ]{2,}|[!?]{2,}|\?|충격|실화|논란|떡밥|추측|예상|전망|미쳤|난리|대박|헐|ㅁㅊ|존나|씨발|병신|개웃|개쩌|레전드|ㅇㅈ|유출|루머|카더라|근황|싱글벙글|펌\)|\.{4,}|…{2,}|질문|궁금|뭐임|뭐냐|어떻게|어떡|고민|추천|후기|리뷰|건의|불만|징징|토론|투표|저격|팩폭|합의|인증/;
+// 개념글 알림용 점수(완전 자동 판정). 디시 몬갤 개념글 33,293개를 읽고 후보 287개의 본문까지 확인해 정한 기준이다.
+// 공식 링크·일정/점검/발표 같은 '소식 신호'는 가점, 잡담·질문·공략·팬 콘텐츠·낚시 말투와 근거 없음은 감점한다. 2점 이상이면 알린다.
+const HARD_NOISE_RE = /[ㅋㅎㅠㅜ]{2,}|ㅅㅂ|ㅈㄴ|ㅁㅊ|씨발|병신|존나|질문|궁금|뭐임|뭐냐|어떻게|어떡|고민|추천|후기|리뷰|건의|불만|징징|토론|투표|저격|팩폭|합의|인증|\?|갓겜|망겜|몬박겜|ㄹㅇ|ㅇㅇ|미친|웃기|개꿀|ㄱㅇㄷ|입갤|갤집|몬붕|몬갤|이새끼|새끼|ㅈ같|지랄/;
+const GUIDE_RE = /공략|족보|세팅|코스|분석|사설|추측|예상|비교|장비|룩|의상|코디|꾸며|평가|모음|팁|뇌피셜|이유|논리|버튼|개추|구나|된거|인거|한거|칭호|스킬|속성표|정리표|계산식|강의|티어|렌더링|띠부씰|아이돌|합방|만화|팬아트|피규어|요리|도촬|찍은|그림|인형|기념|해봤|했음|같음|인듯|노$/;
+const SOFT_STRONG_RE = /비상|충격|실화|논란|떡밥|미쳤|난리|대박|헐|개웃|개쩌|레전드|ㅇㅈ|루머|카더라/;
+const SOFT_WEAK_RE = /!{2,}|\.{4,}|…{2,}|유출|근황|싱글벙글|펌\)/;
+const NOISE_TITLE_RE = new RegExp([HARD_NOISE_RE, GUIDE_RE, SOFT_STRONG_RE, SOFT_WEAK_RE].map(r => r.source).join('|'));   // 호환용: 하나라도 있는 제목
+const EVENT_WORD_RE = /점검|패치|업데이트|배포|개최|시작|종료|발매|출시|예정|안내|공지|일정|쇼케이스|방송|라이브|이식|확정|연장|돌파|오픈베타|체험판|데모|콜라보|게임스컴|도쿄게임쇼|TGS|지스타|페스티벌|참여|참가|출전|대회/;
+const ANNOUNCE_RE = /공개|발표|확정|예정|개최|인하|이식|폐지|연장|돌파|참전/;
+const DATE_RE = /\d+\s*월\s*\d+\s*일|\d{1,2}\s*시|\d+\s*\/\s*\d+|\d{1,2}\.\d{1,2}|오늘|내일|이번\s*주|TU\s*\d|Ver\.?\s*\d|\d\.\d{3}/;
+const SCHEDULE_RE = /일정|예정|안내|공지|요약|배포|개최|시작|종료/;
+const EVENT_NOUN_RE = /점검|패치|업데이트|이벤트|퀘스트|챌린지|데모|방송|라이브|쇼케이스|콜라보|체험판|축제|행사|대회|베타|DLC|TU/i;
+const OFFICIAL_TITLE_RE = /^\s*[\[(【◆]?\s*(공식|오피셜)\s*[\])】]?/;
+const OFFICIAL_LINK_RE = /monsterhunter\.com|capcom\.co\.jp|capcom\.com|x\.com\/MH_Wilds|twitter\.com\/MH_Wilds|store\.steampowered\.com\/(?:news|app\/2246340)|youtube\.com\/@?capcom/i;
+const PASS_SCORE = 2;
+function dcNewsScore(title, evidence) {
+    const reasons = [];
+    let score = 0;
+    const add = (n, why) => { score += n; reasons.push(`${n > 0 ? '+' : ''}${n} ${why}`); };
+    const e = evidence ?? {};
+    if (e.official) add(4, '공식 링크');
+    if (OFFICIAL_TITLE_RE.test(title)) add(3, '제목이 공식·오피셜');
+    if (/점검/.test(title)) add(3, '점검 소식');
+    else if (EVENT_WORD_RE.test(title) && DATE_RE.test(title)) add(3, '일정 키워드 + 날짜');
+    else if (SCHEDULE_RE.test(title) && EVENT_NOUN_RE.test(title)) add(3, '안내·일정 + 이벤트 종류');
+    else if (ANNOUNCE_RE.test(title)) add(2, '발표·확정류 단어');
+    if (e.video || (e.links ?? []).some(h => /youtu|x\.com|twitter/.test(h))) add(1, '영상·공식 SNS 링크');
+    if (HARD_NOISE_RE.test(title)) add(-3, '잡담·질문 말투');
+    if (!e.official) {   // 공식 링크가 있으면 말투 감점은 하지 않는다
+        if (GUIDE_RE.test(title)) add(-3, '공략·후기·팬 콘텐츠 말투');
+        if (SOFT_STRONG_RE.test(title)) add(-2, '어그로 말투');
+        else if (SOFT_WEAK_RE.test(title)) add(-1, '낚시성 표기');
+    }
+    if (!(e.imageCount || e.video || (e.links ?? []).length)) add(-2, '근거(사진·영상·링크) 없음');
+    return { score, pass: score >= PASS_SCORE, reasons };
+}
+
 // 본문에 '근거'가 있는지: 외부 링크, 이미지·영상 첨부, 글자 수. 근거 없는 낚시·잡담 글을 거르는 데 쓴다.
 function dcEvidence(html) {
     const body = dcBodyHtml(html);
     const links = [...body.matchAll(/https?:\/\/([^\/"'\s<>]+)/g)].map(m => m[1].toLowerCase()).filter(h => !/dcinside\.(com|co\.kr)$/.test(h));
-    return { links: [...new Set(links)], media: /<img\b|<iframe\b|<video\b/i.test(body), textLen: stripTags(body.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')).length };
+    return { official: OFFICIAL_LINK_RE.test(body.replace(/&amp;/g, '&')), links: [...new Set(links)], media: /<img\b|<iframe\b|<video\b/i.test(body), video: /<iframe\b|<video\b/i.test(body), imageCount: (body.match(/<img\b/gi) || []).length, textLen: stripTags(body.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')).length };
 }
 
 // 글 본문 텍스트(댓글은 제외). 이미지뿐인 글은 빈 문자열에 가깝다.
@@ -137,7 +172,7 @@ const KINDS = [
     { id: 'patch',       label: '패치·업데이트', re: /패치|업데이트|\bTU\b|(?<![가-힣])버전|Ver\.?\s*\d/i },
     { id: 'eventquest',  label: '이벤트 퀘스트', re: /이벤트\s*퀘|배포\s*퀘|챌린지|격투장/ },
     { id: 'festival',    label: '축제 예고', re: FESTIVAL_RE },
-    { id: 'content',     label: '신규 콘텐츠', re: /신규|신\s*몬스터|DLC|추가\s*몬스터|체험판|공개/i },
+    { id: 'content',     label: '신규 콘텐츠', re: /신규|신\s*몬스터|DLC|추가\s*몬스터|체험판|공개|발매|출시\s*일|예정|확정|인하|이식|폐지|개최/i },
     { id: 'broadcast',   label: '방송·행사 일정', re: /방송|생방|라이브|프렌즈|발표|일정/ },
     { id: 'goods',       label: '판매량·굿즈', re: /판매량|굿즈|인형|피규어|콜라보|실적|\d+\s*만\s*장/ },
 ];
@@ -324,7 +359,7 @@ function confirmBody(body) {
 }
 
 module.exports = {
-    cleanDcTitle, parseOfficialList, parseDcList, parseDcBody, dcPostInfo, dcEvidence, NOISE_TITLE_RE, parseYoutubePlaylist, parseGithubReleases, REFRAMEWORK_API,
+    cleanDcTitle, parseOfficialList, parseDcList, parseDcBody, dcPostInfo, dcEvidence, dcNewsScore, NOISE_TITLE_RE, PASS_SCORE, parseYoutubePlaylist, parseGithubReleases, REFRAMEWORK_API,
     parseSteamEvents, classifySteam, STEAM_EVENTS_API, findOfficialUpdateLink, versionsOf,
     classifyTitle, confirmBody, classifyYoutube, kindOf, tokenize, similarTitles,
     EVENT_KIND, GENERAL_KIND, OFFICIAL_BASE, YT_UPLOADS_PLAYLIST, KST_MS,

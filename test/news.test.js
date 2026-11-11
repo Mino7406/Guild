@@ -342,3 +342,29 @@ test('와일즈 글자가 없어도 격투장·프리 챌린지·몽화의식·�
     assert.equal(p.classifyTitle('스토리즈3 리오레우스 챌린지').action, 'skip');
     assert.equal(p.classifyTitle('오늘 점심 뭐먹지').action, 'skip');
 });
+
+// ── 개념글 점수(parse.dcNewsScore): 디시 몬갤 개념글 실제 글 기준 ──
+const ev = (o = {}) => ({ official: false, links: [], media: false, video: false, imageCount: 0, textLen: 100, ...o });
+test('개념글 점수: 공식 링크·점검·일정 글은 통과', () => {
+    const pass = (t, e) => assert.equal(p.dcNewsScore(t, e).pass, true, `${t} → ${p.dcNewsScore(t, e).reasons.join(', ')}`);
+    pass('내일 와일즈 점검한대', ev({ official: true, links: ['x.com'], imageCount: 2 }));
+    pass('와일즈 콜라보 업데이트 대비 정기 점검 안내', ev({ imageCount: 3 }));
+    pass('스위치2 와일즈 체험판 10월 20일 배포', ev({ imageCount: 7 }));
+    pass('오늘부터 화무 축제 시작함.......', ev({ imageCount: 5 }));
+    pass('와일즈 4월 이벤트 퀘스트 일정', ev({ imageCount: 4 }));
+    pass('화무축제 아이루 인형 출시했우!!!!!', ev({ official: true, links: ['www.e-capcom.com'], imageCount: 3 }));   // 공식 링크가 있으면 말투 감점 없음
+});
+test('개념글 점수: 잡담·어그로·공략·팬 콘텐츠·근거 없는 글은 탈락', () => {
+    const fail = (t, e) => assert.equal(p.dcNewsScore(t, e).pass, false, `${t} → ${p.dcNewsScore(t, e).reasons.join(', ')}`);
+    fail('비상 !! 몬스터헌터 와일즈 사이퍼즈 콜라보 !!', ev({ imageCount: 11 }));
+    fail('축제옷 그라비 24초', ev({ video: true, imageCount: 2 }));
+    fail('12월 24일 나무통 굴리기 겨울축제코스 5번 공략', ev({ imageCount: 13 }));
+    fail('이 버튼을 누르면 몬헌 와일즈가 바로 내일 발매됩니다', ev({ imageCount: 2 }));
+    fail('와일즈 완충주 확정ㅋㅋㅋㅋ', ev({ imageCount: 2 }));
+    fail('어센던스 신규 몬스터 공개', ev({ textLen: 5 }));   // 근거(사진·영상·링크) 없음 + 짧음
+});
+test('개념글 점수: 이유가 함께 나오고 기준 점수는 2점', () => {
+    const r = p.dcNewsScore('와일즈 서버 점검 안내', ev({ imageCount: 1 }));
+    assert.ok(r.reasons.some(x => x.includes('점검')));
+    assert.equal(p.PASS_SCORE, 2);
+});
