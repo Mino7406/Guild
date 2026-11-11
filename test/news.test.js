@@ -155,11 +155,11 @@ test('테스트 미리보기: 모든 임베드 종류 샘플을 만들고(실제
     // 안내 글과 카드가 번갈아 올라간다(안내는 일반 메시지, 카드는 컴포넌트 v2)
     const cards = posts.filter(p => p.components);
     const notes = posts.filter(p => p.content !== undefined);
-    // 카드 = 샘플 중 유튜브(일반 메시지)를 뺀 것 + 이모지 없는 기본 모양 + 흐름의 첫 카드
-    assert.equal(cards.length, samples.length - 1 + 2);
+    // 카드 = 샘플 전부(유튜브 포함) + 이모지 없는 기본 모양 + 흐름의 첫 카드
+    assert.equal(cards.length, samples.length + 2);
     assert.ok(notes.length >= samples.length + 3);
-    // 유튜브 샘플은 영상 임베드용 일반 메시지(링크 포함)
-    assert.ok(notes.some(p => p.content.includes('https://www.youtube.com/watch?v=rVIKWBd_280')));
+    // 유튜브 샘플도 카드이고 영상 썸네일이 들어간다
+    assert.ok(cards.some(p => JSON.stringify(p.components[0].toJSON()).includes('ytimg.com/vi/rVIKWBd_280/maxresdefault.jpg')));
     // 공식 링크 확인 샘플은 버튼이 공식 페이지로, 사진뿐 샘플은 디시 원글로 간다
     const btn = c => { const o = []; (function w(x) { if (!x || typeof x !== 'object') return; if (x.url && x.label) o.push(x); Object.values(x).forEach(w); })(c.components[0].toJSON()); return o[0]; };
     const byLabel = part => samples.findIndex(s => s.label.includes(part));
@@ -193,15 +193,15 @@ test('출처별 이모지·썸네일 매칭', () => {
     const entry = { title: '제목', url: 'https://example.com/x', at: 1, kinds: [], platforms: [], summary: '' };
     const thumbOf = (src) => {
         const e = sources[src];
-        const v = { include: true, kind: { label: 'k' }, ...(src === 'youtube' ? { plainLink: true } : {}) };
+        const v = { include: true, kind: { label: 'k' }, ...(src === 'youtube' ? { videoCard: true } : {}) };
         const payload = buildPayload(e, entry, v, ids);
-        return payload.content ?? payload.components[0].toJSON().components[0].accessory.media.url;
+        return payload.components[0].toJSON().components[0].accessory.media.url;
     };
     assert.match(thumbOf('official'), /emojis\/111\.png/);
     assert.match(thumbOf('dc'), /emojis\/222\.png/);
     assert.match(thumbOf('reframework'), /emojis\/444\.png/);
     // 유튜브는 영상 임베드가 있는 일반 메시지: 맨 위 소제목 앞에 이모지를 붙이지 않는다(이모지 id가 있어도 마찬가지)
-    assert.equal(thumbOf('youtube'), '-# k · 캡콤아시아 유튜브\nhttps://example.com/x');
+    assert.match(thumbOf('youtube'), /emojis\/333\.png/);
     for (const id of ['official', 'dc', 'reframework']) {
         const head = buildPayload(sources[id], entry, { include: true, kind: { label: '패치노트' } }, { [id]: '1' }).components[0].toJSON().components[0].components[0].content;
         assert.ok(/^-# 패치노트 · /.test(head) && !/\p{Extended_Pictographic}/u.test(head), `${id}: ${head}`);
@@ -209,7 +209,9 @@ test('출처별 이모지·썸네일 매칭', () => {
     // 이모지가 아직 없으면 예전 방식으로 보낸다(공식은 공식 이미지, 유튜브는 기본 이모지)
     const off = buildPayload(sources.official, entry, { include: true, kind: { label: 'k' }, thumb: 'https://x/share.png' }, {});
     assert.equal(off.components[0].toJSON().components[0].accessory.media.url, 'https://x/share.png');
-    assert.match(buildPayload(sources.youtube, entry, { include: true, kind: { label: 'k' }, plainLink: true }, {}).content, /^-# k · /);
+    // 유튜브 카드: 영상 썸네일(큰 이미지)이 들어간다
+    const yt = buildPayload(sources.youtube, { ...entry, url: 'https://www.youtube.com/watch?v=ll0G8-nbT7o' }, { include: true, kind: { label: 'k' }, videoCard: true }, {});
+    assert.match(JSON.stringify(yt.components[0].toJSON()), /i\.ytimg\.com\/vi\/ll0G8-nbT7o\/maxresdefault\.jpg/);
 });
 
 test('스팀 한국어 공지 파싱·분류: 한글 패치·점검만 올리고, 영문만 있으면 한글판을 기다린다', () => {

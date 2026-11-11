@@ -167,13 +167,13 @@ test('04 유튜브: 연속된 무기 소개 영상은 둘 다 올리고, 다른 
     const y = sent.filter(s => s.src === 'youtube').map(s => s.title);
     assert.equal(y.length, 2, `영상 카드 ${y.length}개: ${y.join(' | ')}`);
     assert.ok(y.every(t => t.includes('무기 소개')));
-    // 유튜브는 링크가 영상 임베드로 펼쳐지도록 일반 메시지(컴포넌트 v2 플래그 없음)에 영상 주소가 들어 있어야 한다
+    // 유튜브도 다른 출처와 같은 카드(컴포넌트 v2)이고, 영상 주소는 '내용 보기' 버튼에 들어 있어야 한다
     for (const s of sent.filter(x => x.src === 'youtube')) {
-        assert.equal(s.plain, true);
-        assert.equal(s.flags, 0);
-        assert.ok(s.lines[0].includes('https://www.youtube.com/watch?v='), s.lines[0]);
+        assert.equal(s.plain, false);
+        assert.ok(s.flags !== 0);
+        assert.ok(s.url.includes('https://www.youtube.com/watch?v='), s.url);
     }
-    assert.ok(sent.filter(x => x.src !== 'youtube').every(x => !x.plain), '다른 출처는 카드로 보내야 함');
+    assert.ok(sent.every(x => !x.plain), '모든 출처가 카드로 나가야 함');
     record('유튜브 연속 영상(버그 수정 확인)', '무기 소개 영상 2개 모두 올림, 스트리트 파이터 영상 제외', true);
 });
 

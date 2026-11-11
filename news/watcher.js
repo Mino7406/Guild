@@ -18,7 +18,7 @@
 //  - 다른 출처가 같은 소식을 이미 올렸으면(제목이 많이 겹침, 24시간 안) 올리지 않는다.
 
 const {
-    ContainerBuilder, SectionBuilder, TextDisplayBuilder, ThumbnailBuilder,
+    ContainerBuilder, SectionBuilder, TextDisplayBuilder, ThumbnailBuilder, MediaGalleryBuilder, MediaGalleryItemBuilder,
     ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags,
 } = require('discord.js');
 const parse = require('./parse');
@@ -138,7 +138,7 @@ function buildSources(env = process.env) {
             decide: e => {
                 const c = parse.classifyYoutube(e.title);
                 return c.include
-                    ? { include: true, kind: { id: 'video', label: '새 영상' }, plainLink: true }
+                    ? { include: true, kind: { id: 'video', label: '새 영상' }, videoCard: true }
                     : { include: false, reason: c.reason };
             },
         });
@@ -165,11 +165,6 @@ function buildPayload(source, entry, verdict, emojiIds = {}) {
     const emojiId = emojiIds[verdict.emojiSource ?? source.id];
     const sourceLabel = verdict.sourceLabel ?? source.label;   // 디시 글이라도 공식 링크가 확인되면 공식으로 표기
     const url = verdict.url ?? entry.url;
-    // 유튜브는 카드(컴포넌트 v2) 대신 일반 메시지로 보낸다 — 링크가 디스코드 영상 임베드(재생 가능한 미리보기)로 펼쳐지도록.
-    // (컴포넌트 v2 메시지에서는 임베드와 일반 본문을 쓸 수 없다)
-    if (verdict.plainLink) {
-        return { content: `-# ${kind.label} · ${source.label}\n${entry.url}`, allowedMentions: { parse: [] } };
-    }
     const rawTitle = verdict.title ?? entry.title;
     const title = rawTitle.length > 200 ? `${rawTitle.slice(0, 199)}…` : rawTitle;
     const texts = [`-# ${kind.label} · ${sourceLabel}`, `### ${title}`];
@@ -188,6 +183,13 @@ function buildPayload(source, entry, verdict, emojiIds = {}) {
         container.addSectionComponents(new SectionBuilder().addTextDisplayComponents(...lines).setThumbnailAccessory(thumb));
     } else {
         container.addTextDisplayComponents(...lines);
+    }
+    // 유튜브 영상: 영상 썸네일을 카드 안에 크게 보여 준다(디스코드 영상 임베드는 카드에서 쓸 수 없다)
+    const videoId = verdict.videoCard ? /[?&]v=([\w-]{11})/.exec(entry.url)?.[1] : null;
+    if (videoId) {
+        container.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(
+            new MediaGalleryItemBuilder().setURL(`https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`).setDescription(title.slice(0, 100)),
+        ));
     }
     container.addActionRowComponents(new ActionRowBuilder().addComponents(
         new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(BUTTON_LABEL).setURL(url),   // 모든 카드의 버튼 이름은 '내용 보기'로 통일
