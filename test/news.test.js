@@ -73,6 +73,18 @@ test('GitHub 릴리즈 파싱: 초안 제외, 본문 요약', () => {
     assert.deepEqual(p.parseGithubReleases('not json'), []);
 });
 
+test('유튜브 키에 공백·줄바꿈·따옴표가 섞여도 정리해서 요청한다', async () => {
+    let header;
+    const realFetch = global.fetch;
+    global.fetch = async (url, opts) => { header = opts.headers['x-goog-api-key']; return new Response('{"items":[]}', { status: 200 }); };
+    try {
+        const yt = buildSources({ YOUTUBE_API_KEY: ' "AbC-123_xyz"\r\n' }).find(s => s.id === 'youtube');
+        await yt.load();
+        assert.equal(header, 'AbC-123_xyz');
+        assert.equal(buildSources({ YOUTUBE_API_KEY: ' \r\n' }).some(s => s.id === 'youtube'), false);
+    } finally { global.fetch = realFetch; }
+});
+
 test('출처별 이모지·썸네일 매칭', () => {
     const sources = Object.fromEntries(buildSources({ YOUTUBE_API_KEY: 'k' }).map(s => [s.id, s]));
     // 이모지 이름과 PNG 파일이 서로 맞는다

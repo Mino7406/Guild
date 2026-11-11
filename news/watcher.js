@@ -95,12 +95,14 @@ function buildSources(env = process.env) {
             detail: e.summary, button: '릴리즈 보기',
         }),
     });
-    if (env.YOUTUBE_API_KEY) {
+    // 붙여 넣을 때 딸려 온 줄바꿈·공백·따옴표가 키에 섞여도 동작하도록 키에 쓸 수 없는 글자는 뺀다(유튜브 API 키는 영문·숫자·_·- 만 쓴다)
+    const ytKey = String(env.YOUTUBE_API_KEY ?? '').replace(/[^A-Za-z0-9_-]/g, '');
+    if (ytKey) {
         sources.push({
             id: 'youtube', pollMs: 5 * 60_000, maxFresh: 5, maxAgeMs: 3 * 24 * 60 * 60_000, label: '캡콤아시아 유튜브',
             load: async () => parse.parseYoutubePlaylist(await fetchText(
                 `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=10&playlistId=${parse.YT_UPLOADS_PLAYLIST}`,
-                { 'x-goog-api-key': env.YOUTUBE_API_KEY }, // 키는 주소가 아니라 헤더로 보낸다(오류 로그에 안 남도록)
+                { 'x-goog-api-key': ytKey }, // 키는 주소가 아니라 헤더로 보낸다(오류 로그에 안 남도록)
             )),
             decide: e => {
                 const c = parse.classifyYoutube(e.title);
