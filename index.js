@@ -608,6 +608,8 @@ function buildDeleteList() {
 }
 
 async function handleAdminInteraction(interaction) {
+    // 관리 요청이 봇에 닿았는지·허용됐는지 기록(권한 문제를 추적하기 위해)
+    console.log(`[관리] ${interaction.isChatInputCommand() ? '/관리' : interaction.customId} — ${interaction.user.tag}(${interaction.user.id}) 서버 ${interaction.guildId ?? 'DM'} → ${canUseAdmin(interaction) ? '허용' : '거부'}`);
     if (!canUseAdmin(interaction)) return interaction.reply(adminNotice('관리자만 쓸 수 있습니다.'));
     if (interaction.isChatInputCommand()) return interaction.reply(buildAdminPanel(interaction.guildId));
     // 이미 떠 있는 메시지를 고치는 응답(v2 표시는 메시지에 이미 있어서 components 만 보낸다)
