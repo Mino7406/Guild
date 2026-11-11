@@ -18,7 +18,7 @@
 //  - 다른 출처가 같은 소식을 이미 올렸으면(제목이 많이 겹침, 24시간 안) 올리지 않는다.
 
 const {
-    ContainerBuilder, SectionBuilder, TextDisplayBuilder, ThumbnailBuilder, MediaGalleryBuilder, MediaGalleryItemBuilder,
+    AttachmentBuilder, ContainerBuilder, SectionBuilder, TextDisplayBuilder, ThumbnailBuilder, MediaGalleryBuilder, MediaGalleryItemBuilder,
     ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags,
 } = require('discord.js');
 const parse = require('./parse');
@@ -61,6 +61,25 @@ async function fetchText(url, headers = {}) {
     return text;
 }
 
+// 디시 원글의 첫 사진(있으면)과 작성자. 사진을 못 찾아도 알림 판단에는 영향이 없다.
+function imageOf(html) {
+    try {
+        const { author, images } = parse.dcPostInfo(html ?? '');
+        return images.length ? { image: images[0], author } : {};
+    } catch { return {}; }
+}
+const IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+// 디시 사진은 Referer 가 있어야 내려받아진다. 파일 종류는 앞부분 바이트로 알아본다(응답 형식이 octet-stream 으로 온다).
+async function downloadImage(url) {
+    const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT, Referer: 'https://gall.dcinside.com/' }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > IMAGE_MAX_BYTES) throw new Error('사진이 너무 큼');
+    const ext = buf.subarray(0, 3).toString('hex') === 'ffd8ff' ? 'jpg' : buf.subarray(1, 4).toString() === 'PNG' ? 'png' : buf.subarray(0, 3).toString() === 'GIF' ? 'gif' : buf.subarray(8, 12).toString() === 'WEBP' ? 'webp' : null;
+    if (!ext) throw new Error('이미지 형식이 아님');
+    return { buf, name: `dc-image.${ext}` };
+}
+
 // ── 출처 정의 ──────────────────────────────────────────────────
 // load(): 글 목록. decide(entry): { include, kind?, note? } 또는 Promise. maxFresh: 한 번에 이보다 많은 새 글이 보이면 구조 변경으로 본다.
 const DC_LIST = 'https://gall.dcinside.com/mgallery/board/lists/?id=capcommh&sort_type=N&search_head=140&page=1';
@@ -92,7 +111,8 @@ function buildSources(env = process.env) {
                 if (c.action === 'skip') return { include: false, reason: c.reason };
                 const isPatch = c.action === 'include' && c.kind.id === 'patch';
                 // 행사 글(와일즈 참여 확인)과 패치노트 글(공식 링크 확인)만 원글 본문을 읽는다
-                const html = c.action === 'checkBody' || isPatch ? await getHtml(e.url) : null;
+                // 행사·패치 글은 내용 확인용으로 꼭 읽어야 하고(실패하면 던진다), 그 밖의 글은 사진을 찾기 위해서만 읽는다(실패해도 사진 없이 올린다)
+                const html = c.action === 'checkBody' || isPatch ? await getHtml(e.url) : await getHtml(e.url).catch(() => null);
                 if (c.action === 'checkBody') {
                     const r = parse.confirmBody(parse.parseDcBody(html));
                     if (!r.include) return { include: false, reason: r.reason };
@@ -109,9 +129,9 @@ function buildSources(env = process.env) {
                         };
                     }
                     // 링크 없이 사진뿐이면 버튼(내용 보기)이 디시 원글로 간다
-                    return { include: true, kind: c.kind, versions: parse.versionsOf(e.title), versionTier: 'fan' };
+                    return { include: true, kind: c.kind, versions: parse.versionsOf(e.title), versionTier: 'fan', ...imageOf(html) };
                 }
-                return { include: true, kind: c.kind };
+                return { include: true, kind: c.kind, ...imageOf(html) };
             },
         },
     ];
@@ -190,6 +210,12 @@ function buildPayload(source, entry, verdict, emojiIds = {}) {
     if (videoId) {
         container.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(
             new MediaGalleryItemBuilder().setURL(`https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`).setDescription(title.slice(0, 100)),
+        ));
+    }
+    // 디시 원글 사진: 봇이 내려받아 첨부한 파일을 카드 안에 보여 준다
+    if (verdict.imageName) {
+        container.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(
+            new MediaGalleryItemBuilder().setURL(`attachment://${verdict.imageName}`).setDescription(title.slice(0, 100)),
         ));
     }
     container.addActionRowComponents(new ActionRowBuilder().addComponents(
@@ -334,10 +360,21 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
             } else if (verdict.include && !source.noDedup && isDuplicate(source, e, source.id === 'dc' && !verdict.versions?.length)) {
                 logInfo(`${source.label}: 다른 출처가 이미 올린 소식과 겹쳐 건너뜀 — ${e.title}`);
             } else if (verdict.include) {
-                const messageId = await send(source, e, verdict); // 실패하면 던져서 이 글은 '알림 완료'로 기록되지 않는다
+                // 자동짤방 거르기: 제외 목록의 작성자거나, 같은 작성자가 같은 사진을 전에도 썼으면 사진을 붙이지 않는다
+                state.dcImages ??= {};
+                const imgId = verdict.image ? `${verdict.author ?? '?'}|${verdict.image.key}` : null;
+                if (verdict.image && ((state.noImage ?? []).includes(verdict.author) || state.dcImages[imgId])) {
+                    logInfo(`${source.label}: 반복되는 사진(자동짤방 추정)이라 사진 없이 올림 — ${e.title}`);
+                    delete verdict.image;
+                }
+                const messageId = await send(source, e, verdict);
+                if (imgId) {
+                    state.dcImages[imgId] = now();
+                    for (const k of Object.keys(state.dcImages).slice(0, Math.max(0, Object.keys(state.dcImages).length - 300))) delete state.dcImages[k];
+                } // 실패하면 던져서 이 글은 '알림 완료'로 기록되지 않는다
                 if (!source.noDedup) rememberSent(source, e);
                 if (verdict.versions?.length) { state.versions = [...new Set([...state.versions, ...verdict.versions.map(v => `${official ? 'o' : 'f'}:${v}`)])].slice(-60); }
-                for (const v of verdict.versions ?? []) state.cards[v] = { at: now(), id: messageId ?? null, url: verdict.url ?? null, tier: official ? 'official' : 'fan', merged: verdict.mergeFrom !== 'fan' && !!verdict.merge && !verdict.englishOnly };   // 영문뿐이라 나간 카드는 한글판이 올라오면 한 번 갱신한다
+                for (const v of verdict.versions ?? []) state.cards[v] = { at: now(), id: messageId ?? null, url: verdict.url ?? null, tier: official ? 'official' : 'fan', merged: verdict.mergeFrom !== 'fan' && !!verdict.merge && !verdict.englishOnly, img: verdict.imageName ?? null };   // 영문뿐이라 나간 카드는 한글판이 올라오면 한 번 갱신한다
                 const cardKeys = Object.keys(state.cards);
                 for (const k of cardKeys.slice(0, Math.max(0, cardKeys.length - 30))) delete state.cards[k];
                 if (verdict.englishOnly) holdForKo = true;
@@ -414,7 +451,17 @@ function startNewsWatcher(client, store, isPaused = () => false) {
         if (Object.keys(emojiIds).length < Object.keys(EMOJI_NAMES).length && Date.now() - emojiTriedAt > 10 * 60_000) await refreshEmojis();
         const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
         if (!channel?.isTextBased()) throw new Error(`소식 채널을 찾을 수 없음(${NEWS_CHANNEL_ID})`);
-        const message = await channel.send(buildPayload(source, entry, verdict, emojiIds));
+        let files;
+        if (verdict.image) {
+            try {
+                const img = await downloadImage(verdict.image.url);
+                files = [new AttachmentBuilder(img.buf, { name: img.name })];
+                verdict.imageName = img.name;
+            } catch (err) { console.error(`[소식] 사진을 받지 못해 사진 없이 올림: ${err.message}`); }
+        }
+        const payload = buildPayload(source, entry, verdict, emojiIds);
+        if (files) payload.files = files;
+        const message = await channel.send(payload);
         console.log(`[소식] ${source.label} — ${entry.title}`);
         return message.id;
     };
@@ -423,7 +470,7 @@ function startNewsWatcher(client, store, isPaused = () => false) {
         const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
         if (!channel?.isTextBased()) throw new Error(`소식 채널을 찾을 수 없음(${NEWS_CHANNEL_ID})`);
         const message = await channel.messages.fetch(rec.id);
-        await message.edit(buildPayload(source, entry, { ...verdict, url: rec.url ?? verdict.url }, emojiIds));
+        await message.edit(buildPayload(source, entry, { ...verdict, url: rec.url ?? verdict.url, imageName: rec.img ?? undefined }, emojiIds));
         console.log(`[소식] ${source.label} — 카드 갱신: ${entry.title}`);
     };
     const watcher = createWatcher({

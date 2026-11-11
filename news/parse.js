@@ -59,6 +59,23 @@ function parseDcList(html) {
     return out;
 }
 
+// 원글의 작성자 표식(고정닉이면 아이디, 유동이면 닉네임+IP 앞자리)과 본문 이미지 목록. 디시콘·로딩 아이콘은 제외한다.
+// 이미지 주소는 디시가 다른 사이트의 직접 불러오기를 막아서(403) 봇이 직접 내려받아 첨부해야 한다. key 는 같은 파일을 알아보는 데 쓴다.
+function dcPostInfo(html) {
+    const w = html.match(/gall_writer[^>]*data-nick="([^"]*)"[^>]*data-uid="([^"]*)"[^>]*data-ip="([^"]*)"[^>]*data-loc="view"/);
+    const author = w ? (w[2] ? `u:${w[2]}` : `n:${w[1]}${w[3]}`) : null;
+    const images = [];
+    for (const m of dcBodyHtml(html).matchAll(/<img[\s>][^>]*/gi)) {
+        const tag = m[0];
+        if (/written_dccon/.test(tag)) continue;
+        const raw = tag.match(/data-original="([^"]+)"/)?.[1] ?? tag.match(/src="([^"]+)"/)?.[1];
+        if (!raw || !/viewimage\.php/.test(raw)) continue;
+        const url = raw.replace(/&amp;/g, '&');
+        images.push({ url, key: url.match(/[?&]no=([0-9a-f]+)/)?.[1] ?? url });
+    }
+    return { author, images };
+}
+
 // 글 본문 텍스트(댓글은 제외). 이미지뿐인 글은 빈 문자열에 가깝다.
 function dcBodyHtml(html) {
     const start = html.indexOf('class="write_div"');
@@ -288,7 +305,7 @@ function confirmBody(body) {
 }
 
 module.exports = {
-    cleanDcTitle, parseOfficialList, parseDcList, parseDcBody, parseYoutubePlaylist, parseGithubReleases, REFRAMEWORK_API,
+    cleanDcTitle, parseOfficialList, parseDcList, parseDcBody, dcPostInfo, parseYoutubePlaylist, parseGithubReleases, REFRAMEWORK_API,
     parseSteamEvents, classifySteam, STEAM_EVENTS_API, findOfficialUpdateLink, versionsOf,
     classifyTitle, confirmBody, classifyYoutube, kindOf, tokenize, similarTitles,
     EVENT_KIND, GENERAL_KIND, OFFICIAL_BASE, YT_UPLOADS_PLAYLIST, KST_MS,
