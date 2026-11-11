@@ -330,3 +330,14 @@ test('다른 출처가 같은 소식을 올렸으면 건너뛴다', async () => 
     await w.checkSource(yt); await w.checkSource(dc);
     assert.deepEqual(sent, ['yt:어센던스 게임스컴 참여 일정 공개']);
 });
+
+test('와일즈 글자가 없어도 격투장·프리 챌린지·몽화의식·축제 예고와 와일즈 몬스터 챌린지는 와일즈 소식으로 본다', () => {
+    const ok = (t, label) => { const c = p.classifyTitle(t); assert.equal(c.action, 'include', t); assert.equal(c.kind.label, label, t); };
+    ok('프리 챌린지 격투장 퀘스트 배포 안내', '이벤트 퀘스트');
+    ok('알슈베르도 챌린지 내일 종료 예정', '이벤트 퀘스트');
+    ok('몽화의식 개최 예고', '축제 예고');
+    // 다른 게임이거나 와일즈와 무관한 글은 그대로 제외
+    assert.equal(p.classifyTitle('아랜 축제 이벤트 안내').action, 'skip');
+    assert.equal(p.classifyTitle('스토리즈3 리오레우스 챌린지').action, 'skip');
+    assert.equal(p.classifyTitle('오늘 점심 뭐먹지').action, 'skip');
+});

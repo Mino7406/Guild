@@ -119,6 +119,13 @@ function versionsOf(text) {
 // 와일즈 소식만 올린다. 애매하면 올리지 않는다(놓치는 쪽이 잘못 올리는 쪽보다 낫다).
 // 어센던스(Ascendance)는 와일즈의 확장팩이라 와일즈 소식으로 본다
 const WILDS_RE = /와일즈|wilds|MHWs|어센던스|ascendance/i;
+// 제목에 '와일즈'가 없어도 와일즈 소식으로 보는 말: 와일즈 고유 콘텐츠(격투장·프리 챌린지·몽화의식·축제), 그리고 와일즈 몬스터 이름 + 챌린지·격투장·퀘스트
+const WILDS_HINT_RE = /격투장|프리\s*챌린지|몽화\s*의\s*식|몽화의식|축제|페스티벌|festival/i;
+const WILDS_MONSTER_NAMES = (() => {
+    try { return require('fs').readdirSync(require('path').join(__dirname, '..', 'monsters')).filter(f => f.endsWith('.json')).map(f => f.slice(0, -5)).filter(n => n.length >= 3 && !/훈련/.test(n)); } catch { return []; }
+})();
+const MONSTER_CHALLENGE_RE = /챌린지|격투장|퀘스트/;
+const hasWildsMonsterChallenge = title => MONSTER_CHALLENGE_RE.test(title) && WILDS_MONSTER_NAMES.some(n => title.includes(n));
 const OTHER_GAME_RE = /아웃랜더|아랜|스토리즈|stories|outlanders/i;
 const EVENT_RE = /게임\s*위크|게임위크|서머\s*게임|서머게임|게임\s*어워드|게임어워드|도쿄\s*게임\s*쇼|게임스컴|gamescom|지스타|쇼케이스|다이렉트|\bTGA\b|\bTGS\b|\bSGF\b|\bPAX\b|BitSummit/i;
 
@@ -126,7 +133,8 @@ const EVENT_RE = /게임\s*위크|게임위크|서머\s*게임|서머게임|게�
 const KINDS = [
     { id: 'maintenance', label: '점검 예고', re: /점검/ },
     { id: 'patch',       label: '패치·업데이트', re: /패치|업데이트|\bTU\b|(?<![가-힣])버전|Ver\.?\s*\d/i },
-    { id: 'eventquest',  label: '이벤트 퀘스트', re: /이벤트\s*퀘|배포\s*퀘|챌린지/ },
+    { id: 'eventquest',  label: '이벤트 퀘스트', re: /이벤트\s*퀘|배포\s*퀘|챌린지|격투장/ },
+    { id: 'festival',    label: '축제 예고', re: /축제|페스티벌|몽화\s*의?\s*식|festival/i },
     { id: 'content',     label: '신규 콘텐츠', re: /신규|신\s*몬스터|DLC|추가\s*몬스터|체험판|공개/i },
     { id: 'broadcast',   label: '방송·행사 일정', re: /방송|생방|라이브|프렌즈|발표|일정/ },
     { id: 'goods',       label: '판매량·굿즈', re: /판매량|굿즈|인형|피규어|콜라보|실적|\d+\s*만\s*장/ },
@@ -146,7 +154,7 @@ const VIDEO_RE = /트레일러|티저|\bPV\b|영상|무기\s*소개|유튜브|yo
 const WILDS_VER_RE = /\bVer\.?\s*1\.0\d{2}|(?:^|\s)1\.0[4-9]\d\s*(?:패치|업데이트)/i;
 function classifyTitle(title) {
     const named = WILDS_RE.test(title);              // 제목에 와일즈·어센던스가 직접 있음
-    const wilds = named || WILDS_VER_RE.test(title);  // 버전 번호 꼴만으로도 와일즈 소식으로 본다
+    const wilds = named || WILDS_VER_RE.test(title) || WILDS_HINT_RE.test(title) || hasWildsMonsterChallenge(title);  // 버전 번호 꼴·와일즈 고유 콘텐츠(축제·격투장 등)·와일즈 몬스터 챌린지도 와일즈 소식으로 본다
     if (OTHER_GAME_RE.test(title) && !named) return { action: 'skip', reason: '다른 게임' }; // 다른 게임 이름이 있으면 버전 번호만으로는 통과시키지 않는다
     if (EVENT_RE.test(title)) {
         // 행사 글은 제목에 와일즈가 없으면 본문에서 참여 여부를 확인한다
