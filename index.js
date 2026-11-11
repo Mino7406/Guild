@@ -534,7 +534,7 @@ function sourceStatusLine(s) {
     return s.okAt ? `✅ **${s.label}** — ${t(s.okAt)}` : `⏳ **${s.label}** — 아직 확인 전`;
 }
 
-function buildAdminPanel() {
+function buildAdminPanel(guildId) {
     const paused = isNewsPaused();
     const status = getNewsStatus();
     const embed = new EmbedBuilder()
@@ -552,12 +552,9 @@ function buildAdminPanel() {
             new ButtonBuilder().setCustomId('admin_toggle').setLabel(paused ? '소식 재개' : '소식 일시정지').setEmoji(paused ? '▶️' : '⏸️').setStyle(paused ? ButtonStyle.Success : ButtonStyle.Danger)
         ),
         new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('admin_delete').setLabel('소식 삭제').setEmoji('🗑️').setStyle(ButtonStyle.Secondary)
-        ),
-        new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('admin_test_samples').setLabel('임베드 샘플').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('admin_test_recent').setLabel('최근 실제 소식').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('admin_test_both').setLabel('둘 다').setStyle(ButtonStyle.Primary)
+            new ButtonBuilder().setCustomId('admin_delete').setLabel('소식 삭제').setEmoji('🗑️').setStyle(ButtonStyle.Secondary),
+            // 테스트 버튼은 테스트 서버에서만 보인다
+            ...(guildId === NEWS_TEST_GUILD_ID ? [new ButtonBuilder().setCustomId('admin_test').setLabel('테스트').setEmoji('🧪').setStyle(ButtonStyle.Secondary)] : [])
         ),
     ];
     return { embeds: [embed], components: rows };
@@ -611,14 +608,14 @@ async function handleAdminInteraction(interaction) {
     if (!canUseAdmin(interaction)) {
         return interaction.reply({ content: '관리자만 쓸 수 있습니다.', flags: MessageFlags.Ephemeral });
     }
-    if (interaction.isChatInputCommand()) return interaction.reply({ ...buildAdminPanel(), flags: MessageFlags.Ephemeral });
+    if (interaction.isChatInputCommand()) return interaction.reply({ ...buildAdminPanel(interaction.guildId), flags: MessageFlags.Ephemeral });
     if (interaction.customId === 'admin_toggle') {
         adminStore.data.newsPaused = !adminStore.data.newsPaused;
         adminStore.save();
         console.log(`[소식] ${adminStore.data.newsPaused ? '일시정지' : '재개'} (by ${interaction.user.tag})`);
-        return interaction.update(buildAdminPanel());
+        return interaction.update(buildAdminPanel(interaction.guildId));
     }
-    if (interaction.customId === 'admin_refresh') return interaction.update(buildAdminPanel());
+    if (interaction.customId === 'admin_refresh') return interaction.update(buildAdminPanel(interaction.guildId));
     // 잘못 올라온 소식 삭제: 목록에서 고르고 → 확인 → 채널에서 메시지를 지운다
     if (interaction.customId === 'admin_delete') return interaction.reply({ ...buildDeleteList(), flags: MessageFlags.Ephemeral });
     if (interaction.customId === 'admin_pick') {
@@ -646,6 +643,18 @@ async function handleAdminInteraction(interaction) {
         forgetNewsPost(id);
         console.log(`[소식] 메시지 ${id} 삭제 (by ${interaction.user.tag})`);
         return interaction.update({ content: '🗑️ 삭제했습니다. 같은 글은 다시 올라오지 않아요.', components: [] });
+    }
+    // 테스트: 무엇을 올릴지 고른다(테스트 서버에서만)
+    if (interaction.customId === 'admin_test') {
+        return interaction.reply({
+            content: `🧪 <#${NEWS_TEST_CHANNEL_ID}> 에 올릴 테스트를 고르세요. 실제 알림 기록에는 영향이 없어요.`,
+            components: [new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('admin_test_samples').setLabel('임베드 샘플').setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder().setCustomId('admin_test_recent').setLabel('최근 실제 소식').setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder().setCustomId('admin_test_both').setLabel('둘 다').setStyle(ButtonStyle.Primary),
+            )],
+            flags: MessageFlags.Ephemeral,
+        });
     }
     const mode = interaction.customId.replace('admin_test_', '');
     if (['samples', 'recent', 'both'].includes(mode)) return runNewsPreview(interaction, mode);
