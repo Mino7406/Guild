@@ -38,11 +38,13 @@ warmConnection();
 const TEST_GUILD_COMMANDS = [{
     name: '관리',
     description: '[관리] 길드봇 소식 기능 일시정지/재개와 소식 테스트 패널을 엽니다.',
-    default_member_permissions: '8', // 관리자만
 }];
 
 // 소식 기능 일시정지 상태 (꺼졌다 켜져도 유지)
 const adminStore = createStore('admin', { newsPaused: false });
+// /관리 사용 가능: 서버 관리자 권한이 있는 사람 또는 아래 지정 유저
+const ADMIN_USER_IDS = ['457437911869161472'];
+const canUseAdmin = interaction => ADMIN_USER_IDS.includes(interaction.user.id) || !!interaction.memberPermissions?.has('Administrator');
 const isNewsPaused = () => !!adminStore.data.newsPaused;
 
 // 응답이 느릴 때 원인을 볼 수 있도록 기록하는 기준 (디스코드 응답 제한은 3초)
@@ -580,10 +582,10 @@ async function handleAdminInteraction(interaction) {
     if (interaction.guildId !== NEWS_TEST_GUILD_ID) {
         return interaction.reply({ content: '이 기능은 테스트 서버에서만 쓸 수 있습니다.', flags: MessageFlags.Ephemeral });
     }
-    if (interaction.isChatInputCommand()) return interaction.reply({ ...buildAdminPanel(), flags: MessageFlags.Ephemeral });
-    if (!interaction.memberPermissions?.has('Administrator')) {
+    if (!canUseAdmin(interaction)) {
         return interaction.reply({ content: '관리자만 쓸 수 있습니다.', flags: MessageFlags.Ephemeral });
     }
+    if (interaction.isChatInputCommand()) return interaction.reply({ ...buildAdminPanel(), flags: MessageFlags.Ephemeral });
     if (interaction.customId === 'admin_toggle') {
         adminStore.data.newsPaused = !adminStore.data.newsPaused;
         adminStore.save();
