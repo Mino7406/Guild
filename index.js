@@ -552,7 +552,7 @@ function buildAdminPanel() {
             new ButtonBuilder().setCustomId('admin_toggle').setLabel(paused ? '소식 재개' : '소식 일시정지').setEmoji(paused ? '▶️' : '⏸️').setStyle(paused ? ButtonStyle.Success : ButtonStyle.Danger)
         ),
         new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('admin_delete').setLabel('잘못 올라온 소식 삭제').setEmoji('🗑️').setStyle(ButtonStyle.Secondary)
+            new ButtonBuilder().setCustomId('admin_delete').setLabel('소식 삭제').setEmoji('🗑️').setStyle(ButtonStyle.Secondary)
         ),
         new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('admin_test_samples').setLabel('임베드 샘플').setStyle(ButtonStyle.Secondary),
