@@ -150,12 +150,42 @@ test('스팀 한국어 공지 파싱·분류: 한글 패치·점검만 올리고
     assert.equal(r[0].at, 1793000000 * 1000);
     assert.equal(r[1].summary, '점검 안내 본문');
     const cls = r.map(x => p.classifySteam(x.title));
-    assert.deepEqual(cls.map(c => c.include), [true, true, false, false, false]);
+    assert.deepEqual(cls.map(c => c.include), [true, true, false, true, false]);
     assert.equal(cls[0].kind.id, 'patch');
     assert.equal(cls[1].kind.id, 'maintenance');
-    assert.equal(cls[3].defer, true);   // 영문 패치 공지 → 한글판 대기
+    // 영문 제목뿐인 "Update Summary"는 한글판이 끝내 안 나온 적이 있어서 기다리지 않고 한글 제목으로 바꿔 올린다
+    assert.equal(cls[3].titleKo, '업데이트 개요 (Ver.1.042.00.05)');
+    assert.equal(cls[3].englishOnly, true);
     assert.equal(cls[4].defer, undefined); // 영문이지만 패치와 무관
+    // 처음 보는 영문 꼴은 한글판이 올라올 때까지 보류
+    assert.equal(p.classifySteam('Hotfix Patch Notice').defer, true);
+    assert.equal(p.classifySteam('Update Ver. 1.042 — Maintenance Notice').titleKo, '업데이트 Ver.1.042 점검 안내');
+    // 본문 소제목에서 종류·변경 분야를 뽑는다
+    const meta = p.parseSteamEvents(JSON.stringify({ events: [{ gid: '9', event_name: '업데이트 개요 (Ver.1.040)', rtime32_start_time: 1793000000, announcement_body: { body: ['[h2][b]주요 추가 요소 / 사양 변경[/b][/h2]', '[h2][b]오류 수정 / 게임 밸런스 조정 외[/b][/h2]', '[h3][b]【거점 / 시설 관련】[/b][/h3]', '[h3][b]【몬스터 관련】[/b][/h3]', '[h3][b]【플레이어 관련】[/b][/h3]'].join('\n') } }] }))[0];
+    assert.deepEqual(meta.tags, ['주요 추가 요소', '사양 변경', '오류 수정', '밸런스 조정']);
+    assert.deepEqual(meta.areas, ['거점·시설', '몬스터', '플레이어']);
+    assert.equal(meta.summary, '변경 분야: 거점·시설 · 몬스터 · 플레이어');
     assert.deepEqual(p.parseSteamEvents('not json'), []);
+});
+
+test('디시 본문: 스크립트·스타일 블록은 글자로 읽지 않는다(사진뿐인 글은 빈 본문)', () => {
+    const noise = '<script>if(window.OutLink){ var ck = get_cookie("x"); } // wilds 와일즈</script><style>.a{color:red}</style>';
+    const imageOnly = `<div class="write_div"><div><img src="a.jpg"></div>${noise}</div><div class="btn_recommend_box"></div>`;
+    assert.equal(p.parseDcBody(imageOnly), '');
+    assert.equal(p.confirmBody(p.parseDcBody(imageOnly)).reason, '본문 확인 불가');
+    const withText = `<div class="write_div"><div>와일즈 어센던스 일정 안내입니다 많이 시청해 주세요</div>${noise}</div><div class="btn_recommend_box"></div>`;
+    assert.equal(p.parseDcBody(withText), '와일즈 어센던스 일정 안내입니다 많이 시청해 주세요');
+});
+
+test('디시 원글에서 공식 업데이트 페이지 링크와 버전을 찾는다', () => {
+    const post = body => `<div class="write_div" style="x">${body}</div><div class="btn_recommend_box">추천</div><div id="comment_wrap">댓글 https://info.monsterhunter.com/wilds/update/ko-kr/Ver.9.9.9.9.html</div>`;
+    const a = p.findOfficialUpdateLink(post('<p>패치노트 <a href="https://info.monsterhunter.com/wilds/update/ko-kr/Ver.1.042.00.04.html">링크</a></p>'));
+    assert.deepEqual(a, { url: 'https://info.monsterhunter.com/wilds/update/ko-kr/Ver.1.042.00.04.html', version: '1.042.00.04' });
+    // 일본어 페이지 링크도 한국어 페이지로 통일
+    assert.equal(p.findOfficialUpdateLink(post('https://info.monsterhunter.com/wilds/update/ja-jp/Ver.1.042.00.04.html')).url, 'https://info.monsterhunter.com/wilds/update/ko-kr/Ver.1.042.00.04.html');
+    assert.equal(p.findOfficialUpdateLink(post('<img src="a.jpg">')), null);          // 사진뿐
+    assert.equal(p.findOfficialUpdateLink(post('https://example.com/Ver.1.042.html')), null); // 다른 사이트
+    assert.deepEqual(p.versionsOf('Ver.1.042.00.03 / Ver.1.041 패치'), ['1.042.00.03', '1.041']);
 });
 
 test('제목 유사도', () => {

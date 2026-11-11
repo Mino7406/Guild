@@ -58,7 +58,8 @@ function setup({ youtube = true, init = {} } = {}) {
             const payload = buildPayload(source, entry, verdict, { official: '1', dc: '2', youtube: '3', reframework: '4' });
             // 유튜브는 일반 메시지(링크 임베드), 나머지는 카드(컴포넌트 v2)
             const lines = payload.content !== undefined ? [payload.content] : flatten(payload.components[0]);
-            sent.push({ src: source.id, title: entry.title, kind: verdict.kind.label, emoji: verdict.kind.emoji, lines, button: verdict.button ?? '내용 보기', thumb: !!verdict.thumb, url: entry.url, plain: payload.content !== undefined, flags: payload.flags ?? 0 });
+            const buttons = []; (function walk(x) { if (!x || typeof x !== 'object') return; if (x.url && x.label) buttons.push({ label: x.label, url: x.url }); Object.values(x).forEach(walk); })(payload.components?.[0]?.toJSON());
+            sent.push({ buttons, heading: lines[1] ?? '', src: source.id, title: entry.title, kind: verdict.kind.label, emoji: verdict.kind.emoji, lines, button: verdict.button ?? '내용 보기', thumb: !!verdict.thumb, url: entry.url, plain: payload.content !== undefined, flags: payload.flags ?? 0 });
         },
         logInfo: m => (setup.logs ??= []).push(m),
         logFail: (s, e) => (setup.fails ??= []).push(`${s.id}:${e.message}`),
@@ -74,8 +75,8 @@ async function run(w, minutes, step = 1) {
 // 공식 패치노트는 스팀의 한국어 공지 목록으로 받는다. 호출부는 [버전, 날짜, 종류, 플랫폼] 목록 그대로 쓰고, 여기서 스팀 응답 모양으로 바꾼다.
 // 버전이 'EN:' 으로 시작하면 한글 번역이 아직 없는 영문 제목으로 만든다.
 const officialHtml = list => JSON.stringify({ events: list.map(([v, , kinds], i) => {
-    const en = v.startsWith('EN:'); const ver = v.replace('EN:', '');
-    return { gid: String(parseInt(ver.replace(/\D/g, ''), 10)), event_name: en ? `Update Summary (${ver})` : `업데이트 개요 (${ver})`,
+    const en = v.startsWith('EN:'); const unk = v.startsWith('UNK:'); const ver = v.replace('EN:', '').replace('UNK:', '');
+    return { gid: String(parseInt(ver.replace(/\D/g, ''), 10)), event_name: unk ? `Hotfix Patch Notice (${ver})` : en ? `Update Summary (${ver})` : `업데이트 개요 (${ver})`,
         rtime32_start_time: Math.floor(((clock?.t ?? T0) - 60_000 - i * 3600_000) / 1000),
         announcement_body: { body: ['[h2][b]배포일[/b][/h2]', '[b]2026년 11월 11일(수)[/b]', '[list]', `[*] ${kinds.join(' / ')}`, '[/list] https://example.com/x'].join('\n') } };
 }) });
@@ -294,18 +295,75 @@ test('14 성능: 큰 응답·이상한 응답도 빠르고 가볍게 처리한�
     record('성능', `디시 목록(약 300KB) 파싱 ${dcMs.toFixed(1)}ms · 비정상 3MB 응답 ${junkMs.toFixed(0)}ms · 힙 증가 ${heapMB.toFixed(1)}MB`, true, { dcMs, junkMs, heapMB });
 });
 
-test('15 영문만 올라온 패치 공지는 올리지 않고 기다리다가, 한글판이 올라오면 한 번만 올린다', async () => {
+test('15 영문뿐인 패치 공지는 기다리지 않고 한글 제목으로 바로 올리고, 한글판이 나와도 다시 올리지 않는다', async () => {
     const { w } = setup({ init: baseInit() });
     await run(w, 12);
     const list = v => [[v, '', ['오류 수정'], ['Steam']], ['Ver.1.042.00.03', '', ['오류 수정'], ['Steam']]];
     routes.official = officialHtml(list('EN:Ver.1.042.00.07'));
-    await run(w, 40);
-    assert.equal(sent.filter(s => s.src === 'official').length, 0, '영문 제목은 올리면 안 됨');
+    await run(w, 10);
+    let o = sent.filter(s => s.src === 'official');
+    assert.equal(o.length, 1, '영문뿐이어도 한글 제목으로 바로 올려야 함');
+    assert.equal(o[0].heading, '### 업데이트 개요 (Ver.1.042.00.07)');
+    assert.ok(o[0].lines.join(' ').includes('한글 본문 미제공'));
+    assert.ok(!/Update Summary|Release Date|\[h2\]|\[list\]/.test(o[0].lines.join(' ')), '영문 본문·서식이 카드에 나오면 안 됨');
+    routes.official = officialHtml(list('Ver.1.042.00.07')); // 같은 번호의 한글판이 뒤늦게 나와도
+    await run(w, 30);
+    assert.equal(sent.filter(s => s.src === 'official').length, 1, '다시 올리면 안 됨');
+    record('영문뿐인 패치 공지', '한글 제목으로 바로 1개 올림(본문 영문은 싣지 않음), 한글판이 나와도 중복 없음', true);
+});
+
+test('15b 처음 보는 영문 꼴은 한글판이 올라올 때까지 보류했다가 한 번만 올린다', async () => {
+    const { w } = setup({ init: baseInit() });
+    await run(w, 12);
+    const list = v => [[v, '', ['오류 수정'], ['Steam']], ['Ver.1.042.00.03', '', ['오류 수정'], ['Steam']]];
+    routes.official = officialHtml(list('UNK:Ver.1.042.00.08'));
+    await run(w, 30);
+    assert.equal(sent.filter(s => s.src === 'official').length, 0);
     assert.ok(setup.logs.some(m => m.includes('한글판을 기다리는 중')));
-    routes.official = officialHtml(list('Ver.1.042.00.07')); // 같은 번호의 한글판 등장
-    await run(w, 40);
+    routes.official = officialHtml(list('Ver.1.042.00.08'));
+    await run(w, 30);
     const o = sent.filter(s => s.src === 'official');
     assert.equal(o.length, 1);
-    assert.equal(o[0].title, '업데이트 개요 (Ver.1.042.00.07)');
-    record('한글 번역 대기', '영문 공지는 보류, 한글판이 올라오면 한글 카드 1개만 올림', true);
+    assert.equal(o[0].heading, '### 업데이트 개요 (Ver.1.042.00.08)');
+    record('한글 번역 대기(모르는 영문 꼴)', '보류했다가 한글판이 올라오면 1개만 올림', true);
+});
+
+test('16 디시 패치노트 글에 공식 페이지 링크가 있으면 공식으로 표기하고 버튼을 공식 페이지로 건다', async () => {
+    const { w } = setup({ init: baseInit() });
+    await run(w, 12);
+    const OFF = 'https://info.monsterhunter.com/wilds/update/ko-kr/Ver.1.042.00.05.html';
+    routes.dcView = {
+        '601': dcView('이번 패치노트 공식 페이지 ' + OFF + ' 정리해서 올립니다 확인해 보세요 감사합니다'),
+        '602': dcView('같은 패치노트 또 올림 ' + OFF + ' 중복 글입니다 확인해 보세요 감사합니다'),
+    };
+    routes.dc = dcHtml([[602, 'Ver.1.042.00.05 패치노트 또 올림', clock.t - MIN], [601, 'Ver.1.042.00.05 패치노트 공개.jpg', clock.t - 2 * MIN], [100, '기존 와일즈 글', T0 - 3600e3], [99, '아웃랜더스 기존 글', T0 - 7200e3]]);
+    await run(w, 10);
+    const d = sent.filter(s => s.src === 'dc');
+    assert.equal(d.length, 1, '같은 버전은 한 번만');
+    assert.equal(d[0].heading, '### 업데이트 개요 (Ver.1.042.00.05)');
+    assert.ok(d[0].lines[0].includes('Update Information'), d[0].lines[0]);
+    assert.ok(d[0].lines.join(' ').includes('디시 제보로 먼저 확인'));
+    assert.deepEqual(d[0].buttons.map(b => b.label), ['공식 패치노트 보기', '디시 원글']);
+    assert.equal(d[0].buttons[0].url, OFF);
+    assert.match(d[0].buttons[1].url, /gall.dcinside.com.*no=601/);
+    assert.ok(setup.logs.some(m => m.includes('이미 알린 버전')));
+    // 뒤늦게 스팀 한국어 공지가 올라오면 자세한 내용으로 이어서 알린다
+    routes.official = officialHtml([['Ver.1.042.00.05', '', ['오류 수정'], ['Steam']], ['Ver.1.042.00.03', '', ['오류 수정'], ['Steam']]]);
+    await run(w, 10);
+    assert.equal(sent.filter(s => s.src === 'official').length, 1);
+    record('디시 패치노트(공식 링크 있음)', '공식으로 표기, 버튼=공식 페이지·디시 원글, 같은 버전 중복 글은 건너뜀, 뒤이어 스팀 상세 공지', true);
+});
+
+test('17 디시 패치노트 글에 링크 없이 사진뿐이면 디시 제보로 표기하고 버튼을 디시 원글로 건다', async () => {
+    const { w } = setup({ init: baseInit() });
+    await run(w, 12);
+    routes.dcView = { '701': dcView('<img src="a.jpg">') };
+    routes.dc = dcHtml([[701, 'Ver.1.042.00.06 패치노트.jpg', clock.t - MIN], [100, '기존 와일즈 글', T0 - 3600e3], [99, '아웃랜더스 기존 글', T0 - 7200e3]]);
+    await run(w, 10);
+    const d = sent.filter(s => s.src === 'dc');
+    assert.equal(d.length, 1);
+    assert.ok(d[0].lines[0].includes('몬스터헌터 시리즈 갤러리 ⓜ'), d[0].lines[0]);
+    assert.deepEqual(d[0].buttons.map(b => b.label), ['디시 원글 보기']);
+    assert.match(d[0].buttons[0].url, /gall.dcinside.com.*no=701/);
+    record('디시 패치노트(사진뿐)', '디시 제보로 표기, 버튼=디시 원글', true);
 });

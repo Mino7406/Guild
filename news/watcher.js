@@ -72,9 +72,10 @@ function buildSources(env = process.env) {
             load: async () => parse.parseSteamEvents(await fetchText(parse.STEAM_EVENTS_API)),
             decide: e => {
                 const c = parse.classifySteam(e.title);
-                return c.include
-                    ? { include: true, kind: c.kind, detail: e.summary, note: e.dateText ? `배포일 ${e.dateText}` : null, thumb: OFFICIAL_THUMB, button: '내용 보기' }
-                    : { include: false, defer: c.defer, reason: c.reason };
+                if (!c.include) return { include: false, defer: c.defer, reason: c.reason };
+                // 영문뿐인 공지는 한글 제목으로 바꿔 올리고 본문 요약은 싣지 않는다. 그 외에는 공식 사이트 목록과 같은 종류 표시(주요 추가 요소·오류 수정·밸런스 조정)를 붙인다
+                const note = [e.dateText && `배포일 ${e.dateText}`, ...(c.englishOnly ? ['한글 본문 미제공(영문 공지)'] : e.tags)].filter(Boolean).join(' · ');
+                return { include: true, kind: c.kind, title: c.titleKo, detail: c.englishOnly ? null : e.summary, note, thumb: OFFICIAL_THUMB, button: '내용 보기' };
             },
         },
         {
@@ -83,11 +84,28 @@ function buildSources(env = process.env) {
             decide: async e => {
                 const c = parse.classifyTitle(e.title);
                 if (c.action === 'skip') return { include: false, reason: c.reason };
+                const isPatch = c.action === 'include' && c.kind.id === 'patch';
+                // 행사 글(와일즈 참여 확인)과 패치노트 글(공식 링크 확인)만 원글 본문을 읽는다
+                const html = c.action === 'checkBody' || isPatch ? await fetchText(e.url) : null;
                 if (c.action === 'checkBody') {
-                    const r = parse.confirmBody(parse.parseDcBody(await fetchText(e.url)));
+                    const r = parse.confirmBody(parse.parseDcBody(html));
                     if (!r.include) return { include: false, reason: r.reason };
                 }
-                return { include: true, kind: c.kind, button: '원글 보기' };
+                if (isPatch) {
+                    // 원글에 공식 업데이트 페이지 링크가 있으면 공식으로 표기하고 버튼을 공식 페이지로 건다.
+                    // (공식 사이트는 서버 접속이 막혀 내용을 읽어 올 수는 없다. 자세한 내용은 스팀 한국어 공지가 올라오면 이어서 알린다)
+                    const link = parse.findOfficialUpdateLink(html);
+                    if (link) {
+                        return {
+                            include: true, kind: c.kind, title: `업데이트 개요 (Ver.${link.version})`, sourceLabel: 'Update Information', emojiSource: 'official',
+                            url: link.url, note: '디시 제보로 먼저 확인 · 공식 페이지 링크 포함', button: '공식 패치노트 보기',
+                            extraButtons: [{ label: '디시 원글', url: e.url }], versions: [link.version],
+                        };
+                    }
+                    // 링크 없이 사진뿐이면 버튼을 디시 원글로 건다
+                    return { include: true, kind: c.kind, button: '디시 원글 보기', versions: parse.versionsOf(e.title) };
+                }
+                return { include: true, kind: c.kind, button: '디시 원글 보기' };
             },
         },
     ];
@@ -138,16 +156,19 @@ const emojiThumb = id => `https://cdn.discordapp.com/emojis/${id}.png?size=128`;
 // emojiIds: { 출처id: 이모지ID } — 아직 등록 전이면 비어 있고, 그러면 예전 방식(기본 이모지·공식 이미지)으로 보낸다.
 function buildPayload(source, entry, verdict, emojiIds = {}) {
     const kind = verdict.kind;
-    const emojiId = emojiIds[source.id];
+    const emojiId = emojiIds[verdict.emojiSource ?? source.id];
+    const sourceLabel = verdict.sourceLabel ?? source.label;   // 디시 글이라도 공식 링크가 확인되면 공식으로 표기
+    const url = verdict.url ?? entry.url;
     // 유튜브는 카드(컴포넌트 v2) 대신 일반 메시지로 보낸다 — 링크가 디스코드 영상 임베드(재생 가능한 미리보기)로 펼쳐지도록.
     // (컴포넌트 v2 메시지에서는 임베드와 일반 본문을 쓸 수 없다)
     if (verdict.plainLink) {
         const icon = emojiId ? `<:${EMOJI_NAMES[source.id]}:${emojiId}>` : kind.emoji;
         return { content: `-# ${icon} ${kind.label} · ${source.label}\n${entry.url}`, allowedMentions: { parse: [] } };
     }
-    const title = entry.title.length > 200 ? `${entry.title.slice(0, 199)}…` : entry.title;
-    const texts = [`-# ${kind.emoji} ${kind.label} · ${source.label}`, `### ${title}`];
-    const sub = [source.id === 'official' ? null : dayText(entry.at), verdict.note].filter(Boolean).join(' · ');
+    const rawTitle = verdict.title ?? entry.title;
+    const title = rawTitle.length > 200 ? `${rawTitle.slice(0, 199)}…` : rawTitle;
+    const texts = [`-# ${kind.emoji} ${kind.label} · ${sourceLabel}`, `### ${title}`];
+    const sub = [source.id === 'official' || verdict.sourceLabel ? null : dayText(entry.at), verdict.note].filter(Boolean).join(' · ');
     if (verdict.detail) texts.push(verdict.detail.slice(0, 300));
     if (sub) texts.push(`-# ${sub}`);
 
@@ -158,13 +179,14 @@ function buildPayload(source, entry, verdict, emojiIds = {}) {
 
     const container = new ContainerBuilder().setAccentColor(ACCENT);
     if (thumbUrl) {
-        const thumb = new ThumbnailBuilder().setURL(thumbUrl).setDescription(source.label.slice(0, 100));
+        const thumb = new ThumbnailBuilder().setURL(thumbUrl).setDescription(sourceLabel.slice(0, 100));
         container.addSectionComponents(new SectionBuilder().addTextDisplayComponents(...lines).setThumbnailAccessory(thumb));
     } else {
         container.addTextDisplayComponents(...lines);
     }
     container.addActionRowComponents(new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(verdict.button ?? '내용 보기').setURL(entry.url),
+        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(verdict.button ?? '내용 보기').setURL(url),
+        ...(verdict.extraButtons ?? []).slice(0, 4).map(b => new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(b.label).setURL(b.url)),
     ));
     return { components: [container], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
 }
@@ -174,6 +196,7 @@ function buildPayload(source, entry, verdict, emojiIds = {}) {
 function createWatcher({ sources, store, send, now = Date.now, logFail = () => {}, logInfo = () => {} }) {
     const state = store.data;
     state.recent ??= [];
+    state.versions ??= [];   // 이미 알린 패치 버전(디시에서 같은 버전을 여러 사람이 올려도 한 번만 알리기 위해)
     const runtime = new Map(sources.map((s, i) => [s.id, { nextAt: now() + i * STAGGER_MS, fails: 0 }]));
 
     // 다른 출처가 최근 24시간 안에 올린 카드와 제목이 많이 겹치면 같은 소식으로 본다.
@@ -236,11 +259,14 @@ function createWatcher({ sources, store, send, now = Date.now, logFail = () => {
                 if (!deferLogged.has(e.key)) { deferLogged.add(e.key); logInfo(`${source.label}: 한글판을 기다리는 중 — ${e.title}`); }
                 continue;
             }
-            if (verdict.include && !source.noDedup && isDuplicate(source, e)) {
+            if (verdict.include && verdict.versions?.length && verdict.versions.every(v => state.versions.includes(v))) {
+                logInfo(`${source.label}: 이미 알린 버전이라 건너뜀 — ${e.title}`);
+            } else if (verdict.include && !source.noDedup && isDuplicate(source, e)) {
                 logInfo(`${source.label}: 다른 출처가 이미 올린 소식과 겹쳐 건너뜀 — ${e.title}`);
             } else if (verdict.include) {
                 await send(source, e, verdict); // 실패하면 던져서 이 글은 '알림 완료'로 기록되지 않는다
                 if (!source.noDedup) rememberSent(source, e);
+                if (verdict.versions?.length) { state.versions = [...new Set([...state.versions, ...verdict.versions])].slice(-40); }
                 sent++;
             }
             mark(e);
