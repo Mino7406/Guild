@@ -1,12 +1,12 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Events, REST, Routes, ActionRowBuilder, ButtonBuilder, ButtonStyle, Collection, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, SectionBuilder, ThumbnailBuilder, MessageFlags, resolveColor, ActivityType, StringSelectMenuBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Events, REST, Routes, ActionRowBuilder, ButtonBuilder, ButtonStyle, Collection, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, SectionBuilder, ThumbnailBuilder, MessageFlags, resolveColor, ActivityType, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
 const token = process.env.DISCORD_TOKEN;
 const { Agent, request } = require('undici');
 const { flushAll, createStore } = require('./store');
-const { startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, NEWS_CHANNEL_ID, buildSources, previewSamples, previewRecent, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID } = require('./news/watcher');
+const { startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, sendCustomNews, NEWS_CHANNEL_ID, buildSources, previewSamples, previewRecent, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID } = require('./news/watcher');
 const { decideAccess, canToggleLock } = require('./card-lock');
 
 // 디스코드 API 연결을 60초까지 유지한다. 기본값(약 4초)이면 잠깐만 안 써도 연결이 끊겨서
@@ -561,6 +561,7 @@ function buildAdminPanel(guildId) {
     container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
     container.addActionRowComponents(new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('admin_refresh').setLabel('새로고침').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('admin_custom').setLabel('소식 추가').setEmoji('📝').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('admin_delete').setLabel('소식 삭제').setEmoji('🗑️').setStyle(ButtonStyle.Secondary),
         // 테스트 버튼은 테스트 서버에서만 보인다
         ...(guildId === NEWS_TEST_GUILD_ID ? [new ButtonBuilder().setCustomId('admin_test').setLabel('테스트').setEmoji('🧪').setStyle(ButtonStyle.Secondary)] : []),
@@ -612,6 +613,28 @@ async function handleAdminInteraction(interaction) {
     console.log(`[관리] ${interaction.isChatInputCommand() ? '/관리' : interaction.customId} — ${interaction.user.tag}(${interaction.user.id}) 서버 ${interaction.guildId ?? 'DM'} → ${canUseAdmin(interaction) ? '허용' : '거부'}`);
     if (!canUseAdmin(interaction)) return interaction.reply(adminNotice('관리자만 쓸 수 있습니다.'));
     if (interaction.isChatInputCommand()) return interaction.reply(buildAdminPanel(interaction.guildId));
+    // 소식 추가: 자동 감지가 놓친 소식을 관리자가 직접 쓴다. 입력 창에서 제출하면 바로 소식 채널에 올라간다(잘못 올리면 소식 삭제로 지운다).
+    if (interaction.isButton() && interaction.customId === 'admin_custom') {
+        const field = (id, label, style, required, max, placeholder) => new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId(id).setLabel(label).setStyle(style).setRequired(required).setMaxLength(max).setPlaceholder(placeholder));
+        return interaction.showModal(new ModalBuilder().setCustomId('admin_customsubmit').setTitle('소식 추가 — 제출하면 바로 올라가요').addComponents(
+            field('title', '제목', TextInputStyle.Short, true, 100, '예: 어센던스 메인테마곡 풀버전 공개'),
+            field('body', '내용 (선택)', TextInputStyle.Paragraph, false, 1000, '카드에 보여 줄 짧은 설명'),
+            field('url', '링크 (선택, 버튼 주소)', TextInputStyle.Short, false, 500, 'https://… — 없으면 버튼 없이 올라가요'),
+            field('image', '이미지 주소 (선택)', TextInputStyle.Short, false, 500, 'https://… 사진 주소(디시 사진도 가능)'),
+            field('label', '소식 종류 (선택)', TextInputStyle.Short, false, 20, '비우면 "관리자 소식"'),
+        ));
+    }
+    if (interaction.isModalSubmit() && interaction.customId === 'admin_customsubmit') {
+        await interaction.deferReply({ flags: V2_EPHEMERAL });
+        try {
+            const get = id => interaction.fields.getTextInputValue(id);
+            const message = await sendCustomNews(client, { title: get('title'), body: get('body'), url: get('url'), imageUrl: get('image'), label: get('label') });
+            return interaction.editReply({ components: adminNotice(`📝 소식을 올렸습니다. https://discord.com/channels/${message.guildId}/${message.channelId}/${message.id}`).components });
+        } catch (e) {
+            return interaction.editReply({ components: adminNotice(`올리지 못했습니다: ${e.message}`).components });
+        }
+    }
     // 이미 떠 있는 메시지를 고치는 응답(v2 표시는 메시지에 이미 있어서 components 만 보낸다)
     const edit = (text, rows = []) => interaction.update({ components: adminNotice(text, rows).components });
     if (interaction.customId === 'admin_toggle') {
@@ -661,7 +684,7 @@ async function handleAdminInteraction(interaction) {
 
 async function handleInteraction(interaction) {
     if (interaction.isChatInputCommand() && interaction.commandName === '관리') return handleAdminInteraction(interaction);
-    if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('admin_')) return handleAdminInteraction(interaction);
+    if ((interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit()) && interaction.customId.startsWith('admin_')) return handleAdminInteraction(interaction);
     if (interaction.isChatInputCommand() && interaction.commandName === '몬스터') {
         if (isCooldownActive(interaction)) return;
         return openPrivateList(interaction, 0, 'auto');

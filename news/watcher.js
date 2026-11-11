@@ -200,7 +200,7 @@ function buildPayload(source, entry, verdict, emojiIds = {}) {
     const title = rawTitle.length > 200 ? `${rawTitle.slice(0, 199)}…` : rawTitle;
     const texts = [`-# ${kind.label} · ${sourceLabel}`, `### ${title}`];
     const sub = [source.id === 'official' || verdict.sourceLabel ? null : dayText(entry.at), verdict.note].filter(Boolean).join(' · ');
-    if (verdict.detail) texts.push(verdict.detail.slice(0, 300));
+    if (verdict.detail) texts.push(verdict.detail.slice(0, verdict.detailMax ?? 300));
     if (sub) texts.push(`-# ${sub}`);
 
     const thumbUrl = emojiId ? emojiThumb(emojiId) : verdict.thumb;
@@ -223,14 +223,17 @@ function buildPayload(source, entry, verdict, emojiIds = {}) {
         ));
     }
     // 디시 원글 사진: 봇이 내려받아 첨부한 파일을 카드 안에 보여 준다
-    if (verdict.imageName) {
+    const imageSrc = verdict.imageName ? `attachment://${verdict.imageName}` : verdict.imageUrl;   // imageUrl: 관리자가 직접 올리는 소식의 이미지 주소
+    if (imageSrc) {
         container.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(
-            new MediaGalleryItemBuilder().setURL(`attachment://${verdict.imageName}`).setDescription(title.slice(0, 100)),
+            new MediaGalleryItemBuilder().setURL(imageSrc).setDescription(title.slice(0, 100)),
         ));
     }
-    container.addActionRowComponents(new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(BUTTON_LABEL).setURL(url),   // 모든 카드의 버튼 이름은 '🔗 내용 보기'로 통일
-    ));
+    if (url) {   // 관리자 소식은 링크가 없을 수 있다(버튼 없이 올림)
+        container.addActionRowComponents(new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(BUTTON_LABEL).setURL(url),   // 모든 카드의 버튼 이름은 '🔗 내용 보기'로 통일
+        ));
+    }
     return { components: [container], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
 }
 
@@ -442,7 +445,14 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
         for (const [k, rec] of Object.entries(state.cards)) if (rec.id === id) delete state.cards[k];
         store.save();
     }
-    return { checkSource, tick, status, posts, forget };
+    // 관리자가 /관리에서 직접 올린 소식도 같은 기록(삭제 목록·오늘 올린 수)에 남긴다
+    function recordPost(id, title, label) {
+        state.posted = [...state.posted, { id, title: String(title).slice(0, 80), label, at: now() }].slice(-25);
+        const d = dayKey();
+        state.stats.days[d] = (state.stats.days[d] ?? 0) + 1;
+        store.save();
+    }
+    return { checkSource, tick, status, posts, forget, recordPost };
 }
 
 // 같은 오류가 계속 나도 로그를 도배하지 않게 출처별로 1시간에 한 번만 남긴다.
@@ -451,6 +461,36 @@ let currentWatcher = null;
 const getNewsStatus = () => currentWatcher?.status() ?? null;
 const getNewsPosts = () => currentWatcher?.posts() ?? [];
 const forgetNewsPost = id => currentWatcher?.forget(id);
+
+// 관리자가 직접 쓴 소식을 소식 채널에 올린다. fields: { title, body?, url?, imageUrl?, label? } — 잘못된 입력은 Error 로 알려 준다.
+async function sendCustomNews(client, fields) {
+    const httpUrl = v => { try { const u = new URL(v); return /^https?:$/.test(u.protocol) ? u.href : null; } catch { return null; } };
+    const title = String(fields.title ?? '').trim();
+    if (!title) throw new Error('제목을 입력해 주세요.');
+    const url = fields.url ? httpUrl(fields.url.trim()) : null;
+    if (fields.url && !url) throw new Error('링크는 http:// 또는 https:// 로 시작하는 주소여야 해요.');
+    const imageUrl = fields.imageUrl ? httpUrl(fields.imageUrl.trim()) : null;
+    if (fields.imageUrl && !imageUrl) throw new Error('이미지 주소는 http:// 또는 https:// 로 시작하는 주소여야 해요.');
+    const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
+    if (!channel?.isTextBased()) throw new Error(`소식 채널을 찾을 수 없음(${NEWS_CHANNEL_ID})`);
+    const label = String(fields.label ?? '').trim().slice(0, 20) || '관리자 소식';
+    const verdict = { kind: { id: 'custom', label }, detail: String(fields.body ?? '').trim() || undefined, detailMax: 1500, url: url ?? undefined };
+    let files;
+    if (imageUrl) {
+        // 디시 사진은 직접 불러오기가 막혀 있어 봇이 내려받아 첨부하고, 그 밖의 주소는 그대로 쓴다
+        if (/(^|\.)dcinside\.(co\.kr|com)$/i.test(new URL(imageUrl).hostname)) {
+            const img = await downloadImage(imageUrl);
+            files = [new AttachmentBuilder(img.buf, { name: img.name })];
+            verdict.imageName = img.name;
+        } else verdict.imageUrl = imageUrl;
+    }
+    const payload = buildPayload({ id: 'custom', label: '길드봇' }, { url: url ?? '', title, at: Date.now() }, verdict, {});
+    if (files) payload.files = files;
+    const message = await channel.send(payload);
+    currentWatcher?.recordPost(message.id, title, label);
+    console.log(`[소식] 관리자 소식 — ${title}`);
+    return message;
+}
 function startNewsWatcher(client, store, isPaused = () => false) {
     if (timer) return;
     const sources = buildSources();
@@ -650,6 +690,6 @@ async function previewSamples({ sources, post, edit, emojiIds = {}, wait = ms =>
 }
 
 module.exports = {
-    startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, createWatcher, buildSources, buildPayload, NEWS_CHANNEL_ID, EMOJI_NAMES, EmptyListError,
+    startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, sendCustomNews, createWatcher, buildSources, buildPayload, NEWS_CHANNEL_ID, EMOJI_NAMES, EmptyListError,
     collectRecent, previewRecent, previewSamples, buildSamples, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID,
 };
