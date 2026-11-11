@@ -28,6 +28,11 @@ test('디시 목록 파싱: 광고·설문 줄 제외', () => {
     assert.equal(r[0].at, Date.parse('2026-11-11T10:05:05+09:00'));
 });
 
+test('디시 제목의 HTML 기호(10진수·16진수·&amp;)를 글자로 바꾼다', () => {
+    const html = row('1', '공식', '&#x1f517;알슈베르도 &amp; 챌린지 &#128279;', '2026-11-11 10:05:05');
+    assert.equal(p.parseDcList(html)[0].title, '🔗알슈베르도 & 챌린지 🔗');
+});
+
 test('디시 분류', () => {
     const c = t => p.classifyTitle(t);
     assert.equal(c('내일 오전 10시 와일즈 점검 및 패치 예정.jpg').action, 'include');

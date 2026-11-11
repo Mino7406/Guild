@@ -8,7 +8,9 @@ const DC_VIEW = 'https://gall.dcinside.com/mgallery/board/view/?id=capcommh&no='
 
 const decodeEntities = s => s
     .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&amp;/g, '&');
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16))) // &#x1f517; 같은 16진수 기호(디시 제목의 🔗 등)
+    .replace(/&amp;/g, '&');
 const stripTags = s => decodeEntities(s.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
 
 // ── 공식 패치노트 목록 (info.monsterhunter.com/wilds/update/ko-kr/) ──────────────────
