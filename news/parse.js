@@ -131,6 +131,42 @@ function classifyYoutube(title) {
     return { include: true };
 }
 
+// ── 스팀 공식 공지(캡콤이 올리는 업데이트 요약·점검 공지) ──────────────────────────
+// 공식 업데이트 사이트(info.monsterhunter.com)가 서버 접속을 막아서, 같은 내용을 스팀의 공개 뉴스 API 로 받는다.
+const STEAM_NEWS_API = 'https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=2246340&count=15&maxlength=600&feeds=steam_community_announcements&format=json';
+const PATCH_KIND = { id: 'patch', label: '패치노트', emoji: '📢' };
+const MAINT_KIND = { id: 'maintenance', label: '점검 예고', emoji: '🛠️' };
+function cleanSteamText(s) {
+    return String(s ?? '')
+        .replace(/\[\/?[a-z0-9*]+[^\]]*\]/gi, ' ')   // [h3] [url=…] 같은 서식 표시
+        .replace(/\{STEAM_CLAN_IMAGE\}\S*/g, ' ').replace(/https?:\/\/\S+/g, ' ')
+        .replace(/\s+/g, ' ').trim();
+}
+function parseSteamNews(jsonText) {
+    let items;
+    try { items = JSON.parse(jsonText)?.appnews?.newsitems; } catch { return []; }
+    if (!Array.isArray(items)) return [];
+    const out = [];
+    for (const n of items) {
+        if (!n || n.gid == null || typeof n.title !== 'string') continue;
+        const at = Number(n.date) * 1000;
+        const summary = cleanSteamText(n.contents);
+        out.push({
+            key: `steam-${n.gid}`, title: n.title.trim(),
+            url: `https://store.steampowered.com/news/app/2246340/view/${n.gid}`,
+            at: Number.isFinite(at) && at > 0 ? at : null,
+            summary: summary.length > 240 ? `${summary.slice(0, 239)}…` : summary,
+        });
+    }
+    return out;
+}
+// 패치·점검 공지만 올린다(영상·가격·행사 공지는 다른 출처가 맡는다)
+const STEAM_PATCH_RE = /Update Summary|Title Update|\bVer\.?\s*\d|Maintenance|Patch|업데이트|점검/i;
+function classifySteam(title) {
+    if (!STEAM_PATCH_RE.test(title)) return { include: false, reason: '패치·점검 공지 아님' };
+    return { include: true, kind: /Maintenance|점검/i.test(title) ? MAINT_KIND : PATCH_KIND };
+}
+
 // ── GitHub 릴리즈(REFramework Nightly) ──────────────────────────────────────────
 const REFRAMEWORK_API = 'https://api.github.com/repos/praydog/REFramework-nightly/releases?per_page=5';
 // 릴리즈 본문의 앞부분만 짧게(마크다운 기호 정리, 최대 3줄·240자)
@@ -185,6 +221,7 @@ function confirmBody(body) {
 
 module.exports = {
     parseOfficialList, parseDcList, parseDcBody, parseYoutubePlaylist, parseGithubReleases, REFRAMEWORK_API,
+    parseSteamNews, classifySteam, STEAM_NEWS_API,
     classifyTitle, confirmBody, classifyYoutube, kindOf, tokenize, similarTitles,
     EVENT_KIND, GENERAL_KIND, OFFICIAL_BASE, YT_UPLOADS_PLAYLIST, KST_MS,
 };

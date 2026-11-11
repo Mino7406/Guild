@@ -119,6 +119,26 @@ test('출처별 이모지·썸네일 매칭', () => {
     assert.match(buildPayload(sources.youtube, entry, { include: true, kind: { label: 'k', emoji: 'E' }, plainLink: true }, {}).content, /^-# E k/);
 });
 
+test('스팀 공식 공지 파싱·분류: 패치·점검만 올린다', () => {
+    const json = JSON.stringify({ appnews: { newsitems: [
+        { gid: '1', title: 'Update Summary (Ver.1.042.00.03)', date: 1793000000, contents: '[h3]Notice[/h3] You must install the latest version https://x.y/z {STEAM_CLAN_IMAGE}/a.png' },
+        { gid: '2', title: 'Update Ver. 1.042 — Maintenance Notice', date: 1792000000, contents: 'Maintenance on Monday' },
+        { gid: '3', title: 'Khezu Stretches into Monster Hunter Wilds: Ascendance!', date: 1791000000, contents: 'video' },
+        { gid: '4', title: 'From August 4, Monster Hunter Wilds is Available at a New Price', date: 1790000000, contents: 'price' },
+        { title: '번호 없음' },
+    ] } });
+    const r = p.parseSteamNews(json);
+    assert.equal(r.length, 4);
+    assert.equal(r[0].key, 'steam-1');
+    assert.equal(r[0].url, 'https://store.steampowered.com/news/app/2246340/view/1');
+    assert.equal(r[0].summary, 'Notice You must install the latest version');
+    assert.equal(r[0].at, 1793000000 * 1000);
+    assert.deepEqual(r.map(x => p.classifySteam(x.title).include), [true, true, false, false]);
+    assert.equal(p.classifySteam(r[0].title).kind.id, 'patch');
+    assert.equal(p.classifySteam(r[1].title).kind.id, 'maintenance');
+    assert.deepEqual(p.parseSteamNews('not json'), []);
+});
+
 test('제목 유사도', () => {
     const a = p.tokenize('몬스터헌터 와일즈 어센던스 게임스컴 참여 일정');
     assert.equal(p.similarTitles(a, p.tokenize('게임스컴 어센던스 참여 일정 안내')), true);

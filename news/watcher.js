@@ -1,7 +1,7 @@
 // 몬스터 헌터 와일즈(어센던스 포함) 소식을 지켜보다가 새 소식이 올라오면 #와일즈_소식 채널에 카드로 올린다.
 //
 // 출처 세 곳
-//  - official : 공식 패치노트 목록 (info.monsterhunter.com) — 10분마다
+//  - official : 공식 패치노트·점검 공지(스팀 공개 뉴스 API의 캡콤 공지; 공식 사이트는 서버 접속을 막아 쓰지 않음) — 10분마다
 //  - reframework : REFramework-nightly GitHub 새 릴리즈 — 5분마다
 //  - youtube  : 캡콤아시아 업로드 목록 (YouTube Data API, 키는 .env 의 YOUTUBE_API_KEY) — 5분마다
 //  - dc       : 디시 몬갤 "공식" 말머리 글 중 와일즈 소식 — 5분마다 (제목으로 분류, 행사 글은 본문에서 와일즈 참여 확인)
@@ -67,14 +67,15 @@ const DC_LIST = 'https://gall.dcinside.com/mgallery/board/lists/?id=capcommh&sor
 function buildSources(env = process.env) {
     const sources = [
         {
-            id: 'official', pollMs: 10 * 60_000, maxFresh: 3, noDedup: true, label: 'Update Information',
-            load: async () => parse.parseOfficialList(await fetchText(parse.OFFICIAL_BASE)),
-            decide: e => ({
-                include: true,
-                kind: { id: 'patch', label: '패치노트', emoji: '📢' },
-                note: [e.dateText && `배포 ${e.dateText}`, e.platforms.join(' · '), e.kinds.join(' / ')].filter(Boolean).join(' · '),
-                thumb: OFFICIAL_THUMB, button: '내용 보기',
-            }),
+            // 공식 업데이트 사이트(info.monsterhunter.com)는 서버 접속을 403으로 막아서, 같은 공지를 스팀 공개 뉴스 API 로 받는다.
+            id: 'official', pollMs: 10 * 60_000, maxFresh: 3, noDedup: true, maxAgeMs: 7 * 24 * 60 * 60_000, label: 'Update Information',
+            load: async () => parse.parseSteamNews(await fetchText(parse.STEAM_NEWS_API)),
+            decide: e => {
+                const c = parse.classifySteam(e.title);
+                return c.include
+                    ? { include: true, kind: c.kind, detail: e.summary, thumb: OFFICIAL_THUMB, button: '내용 보기' }
+                    : { include: false, reason: c.reason };
+            },
         },
         {
             id: 'dc', pollMs: 5 * 60_000, maxFresh: 10, maxAgeMs: 36 * 60 * 60_000, label: '몬스터헌터 시리즈 갤러리 ⓜ',

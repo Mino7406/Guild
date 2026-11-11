@@ -36,7 +36,7 @@ function setup({ youtube = true, init = {} } = {}) {
     Object.assign(routes, init);
     global.fetch = async (url) => {
         url = String(url);
-        const key = url.includes('info.monsterhunter.com') ? 'official'
+        const key = url.includes('api.steampowered.com') ? 'official'
             : url.includes('gall.dcinside.com') && url.includes('/view/') ? 'dcView'
             : url.includes('gall.dcinside.com') ? 'dc'
             : url.includes('googleapis.com') ? 'yt'
@@ -70,7 +70,12 @@ async function run(w, minutes, step = 1) {
 }
 
 // ── 가짜 응답 만들기 ────────────────────────────────────────────
-const officialHtml = list => `<ul class="latest_update">${list.map(([v, d, kinds, pf]) => `<li class="latest_update_list ${v.replace(/\./g, '-')}"><a href="./${v}.html"><p class="latest_update_list_ver">${v}</p><div><dl class="latest_update_list_date"><dt>배포일</dt><dd>${d}</dd></dl><dl class="latest_update_list_detail"><dt>【주요】</dt><dd><ul>${kinds.map(k => `<li>${k}</li>`).join('')}</ul></dd></dl></div><ul class="latest_update_list_platform">${pf.map(p => `<li class="${p}">${p}</li>`).join('')}</ul></a></li>`).join('')}</ul>`;
+// 공식 패치노트는 스팀 공개 뉴스 API(캡콤 공지)로 받는다. 호출부는 [버전, 날짜, 종류, 플랫폼] 목록 그대로 쓰고, 여기서 스팀 응답 모양으로 바꾼다.
+const officialHtml = list => JSON.stringify({ appnews: { appid: 2246340, newsitems: list.map(([v, , kinds], i) => ({
+    gid: String(parseInt(v.replace(/\D/g, ''), 10)), title: `Update Summary (${v})`, feedname: 'steam_community_announcements',
+    date: Math.floor(((clock?.t ?? T0) - 60_000 - i * 3600_000) / 1000), url: 'https://steamstore-a.akamaihd.net/x',
+    contents: `[h3]Release Date[/h3] Tuesday [b]${kinds.join(' / ')}[/b] https://example.com/x`,
+})) } });
 const dcRow = (num, title, at) => `<tr class="ub-content us-post" data-no="${num}"> <td class="gall_num">${num}</td> <td class="gall_subject">🕊공식</td> <td class="gall_tit ub-word"> <a href="/mgallery/board/view/?id=capcommh&no=${num}&search_head=140&page=1" view-msg =""> <em class="icon_img icon_recomimg"></em>${title}</a> <a class="reply_numbox" href="#"><span class="reply_num">[3]</span></a> </td> <td class="gall_date" title="${kst(at)}">10:05</td> </tr>`;
 const dcHtml = rows => `<table><tr class="ub-content "><td class="gall_num">-</td><td class="gall_subject"><b>설문</b></td><td class="gall_tit ub-word"><a href="javascript:;"><b>광고 줄</b></a></td></tr>${rows.map(r => dcRow(...r)).join('')}</table>`;
 const dcView = text => `<div class="gallview"><div class="write_div" style="x"><div>${text}</div></div><div class="btn_recommend_box">추천</div><div id="comment_wrap">댓글: 와일즈 와일즈 와일즈 도배 댓글입니다</div></div>`;
@@ -108,9 +113,10 @@ test('02 공식 새 버전이 올라오면 카드 1개, 다시 확인해도 중�
     await run(w, 40);
     const o = sent.filter(s => s.src === 'official');
     assert.equal(o.length, 1);
-    assert.equal(o[0].title, 'Ver.1.042.00.04');
-    assert.ok(o[0].lines.join(' ').includes('Steam'));
-    record('공식 패치노트 새 버전', '카드 1개(플랫폼·종류 표시), 재확인해도 중복 없음', true);
+    assert.equal(o[0].title, 'Update Summary (Ver.1.042.00.04)');
+    assert.ok(o[0].lines.join(' ').includes('주요 추가 요소'), o[0].lines.join(' | ')); // 본문 요약(서식 표시 제거)
+    assert.ok(!o[0].lines.join(' ').includes('[h3]') && !o[0].lines.join(' ').includes('https://'));
+    record('공식 패치노트 새 버전(스팀 공식 공지)', '카드 1개(본문 요약 포함), 재확인해도 중복 없음', true);
 });
 
 test('03 디시: 섞인 글 6개 중 와일즈 소식 2개만 올린다', async () => {
