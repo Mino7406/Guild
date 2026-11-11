@@ -61,7 +61,7 @@ function setup({ youtube = true, init = {} } = {}) {
             // 유튜브는 일반 메시지(링크 임베드), 나머지는 카드(컴포넌트 v2)
             const lines = payload.content !== undefined ? [payload.content] : flatten(payload.components[0]);
             const buttons = []; (function walk(x) { if (!x || typeof x !== 'object') return; if (x.url && x.label) buttons.push({ label: x.label, url: x.url }); Object.values(x).forEach(walk); })(payload.components?.[0]?.toJSON());
-            sent.push({ buttons, heading: lines[1] ?? '', src: source.id, title: entry.title, kind: verdict.kind.label, emoji: verdict.kind.emoji, lines, button: verdict.button ?? '내용 보기', thumb: !!verdict.thumb, url: entry.url, plain: payload.content !== undefined, flags: payload.flags ?? 0 });
+            sent.push({ buttons, heading: lines[1] ?? '', src: source.id, title: entry.title, kind: verdict.kind.label, lines, button: verdict.button ?? '내용 보기', thumb: !!verdict.thumb, url: entry.url, plain: payload.content !== undefined, flags: payload.flags ?? 0 });
             return 'm' + sent.length;
         },
         // 먼저 나간 카드를 고치는 동작(실제 코드와 같은 방식으로 카드를 다시 만든다)
@@ -98,7 +98,7 @@ const ytJson = list => JSON.stringify({ items: list.map(([id, title, at]) => ({ 
 const ghJson = list => JSON.stringify(list.map(([id, name, tag, body, extra = {}]) => ({ id, name, tag_name: tag, html_url: `https://github.com/praydog/REFramework-nightly/releases/tag/${tag}`, published_at: new Date(clock?.t ?? T0).toISOString(), body, prerelease: true, draft: false, ...extra })));
 
 function record(name, expectation, ok, detail = {}) {
-    results.push({ name, expectation, ok, sent: sent.map(s => ({ src: s.src, kind: `${s.emoji} ${s.kind}`, title: s.title, lines: s.lines, button: s.button })), ...detail });
+    results.push({ name, expectation, ok, sent: sent.map(s => ({ src: s.src, kind: s.kind, title: s.title, lines: s.lines, button: s.button })), ...detail });
 }
 
 test.after(() => {
@@ -152,7 +152,7 @@ test('03 디시: 섞인 글 6개 중 와일즈 소식 2개만 올린다', async 
     routes.dcView = { '204': routes.dcView['201'], '205': routes.dcView['202'], '206': routes.dcView['203'] };
     await run(w, 10);
     const d = sent.filter(s => s.src === 'dc').map(s => s.title);
-    assert.deepEqual(d.sort(), ['내일 오전 10시 와일즈 점검 및 패치 예정.jpg', '파리 게임 위크 공식 일정 안내.jpg'].sort());
+    assert.deepEqual(d.sort(), ['내일 오전 10시 와일즈 점검 및 패치 예정', '파리 게임 위크 공식 일정 안내'].sort());
     record('디시 분류(섞인 글 6개)', '점검 예고·와일즈 참여 행사만 2개 올림. 아웃랜더스·영상·불참 행사·이미지뿐인 행사는 제외', true);
 });
 
@@ -320,7 +320,12 @@ test('15 영문뿐인 패치 공지는 기다리지 않고 한글 제목으로 �
     routes.official = officialHtml(list('Ver.1.042.00.07')); // 같은 번호의 한글판이 뒤늦게 나와도
     await run(w, 30);
     assert.equal(sent.filter(s => s.src === 'official').length, 1, '다시 올리면 안 됨');
-    record('영문뿐인 패치 공지', '한글 제목으로 바로 1개 올림(본문 영문은 싣지 않음), 한글판이 나와도 중복 없음', true);
+    // 한글판이 나오면 새 메시지 없이 먼저 나간 카드를 한글 내용으로 한 번 갱신한다
+    assert.equal(edits.length, 1);
+    assert.ok(edits[0].lines.join(' ').includes('오류 수정') && !edits[0].lines.join(' ').includes('한글 본문 미제공'), edits[0].lines.join(' | '));
+    await run(w, 30);
+    assert.equal(edits.length, 1, '한 번만 갱신');
+    record('영문뿐인 패치 공지', '한글 제목으로 바로 1개 올림(본문 영문은 싣지 않음), 한글판이 나오면 새 메시지 없이 그 카드를 한글 내용으로 갱신', true);
 });
 
 test('15b 처음 보는 영문 꼴은 한글판이 올라올 때까지 보류했다가 한 번만 올린다', async () => {
@@ -443,6 +448,61 @@ test('20 먼저 나간 카드를 고칠 수 없으면(메시지 삭제 등) 새 
     assert.equal(sent.filter(s => s.src === 'official').length, 1, '갱신이 실패하면 새 카드로 알려야 함');
     assert.ok(setup.logs.some(m => m.includes('카드 갱신 실패')));
     record('카드 갱신 실패', '메시지를 고칠 수 없으면 새 카드로 알림(정보 누락 없음)', true);
+});
+
+test('21 제목에 버전 앞부분만 있어도(Ver.1.042) 같은 업데이트(1.042.00.05)면 한 메시지로 합친다', async () => {
+    const { w } = setup({ init: baseInit() });
+    await run(w, 12);
+    const OFF = 'https://info.monsterhunter.com/wilds/update/ko-kr/Ver.1.042.00.05.html';
+    routes.dcView = { '1001': dcView('<img src="a.jpg">'), '1002': dcView('공식 페이지 ' + OFF + ' 입니다 확인해 보세요 감사합니다 많이 봐 주세요') };
+    const base = [[100, '기존 와일즈 글', T0 - 3600e3], [99, '아웃랜더스 기존 글', T0 - 7200e3]];
+    routes.dc = dcHtml([[1001, '와일즈 ver 1.042 오늘자 패치내역.jpg', clock.t - MIN], ...base]);
+    await run(w, 6);
+    assert.equal(sent.filter(s => s.src === 'dc').length, 1);
+    routes.dc = dcHtml([[1002, 'Ver.1.042.00.05 패치노트 공개', clock.t - MIN], [1001, '와일즈 ver 1.042 오늘자 패치내역.jpg', clock.t - 7 * MIN], ...base]);
+    await run(w, 6);
+    assert.equal(sent.filter(s => s.src === 'dc').length, 1, '같은 업데이트를 새 메시지로 또 보내면 안 됨');
+    assert.equal(edits.length, 1);
+    record('버전 앞부분만 있는 제보', 'Ver.1.042 제보와 1.042.00.05 공식 링크 글을 같은 업데이트로 보고 한 메시지로 합침', true);
+});
+
+test('22 버전 번호가 없는 같은 점검 예고를 여러 사람이 올려도 한 번만 알린다(버전이 다른 글은 따로)', async () => {
+    const { w } = setup({ init: baseInit() });
+    await run(w, 12);
+    const base = [[100, '기존 와일즈 글', T0 - 3600e3], [99, '아웃랜더스 기존 글', T0 - 7200e3]];
+    routes.dc = dcHtml([[1101, '내일 오전 10시 와일즈 점검 및 패치 예정.jpg', clock.t - 2 * MIN], ...base]);
+    await run(w, 6);
+    routes.dc = dcHtml([[1102, '내일 10시 점검 및 패치 예정 와일즈', clock.t - MIN], [1101, '내일 오전 10시 와일즈 점검 및 패치 예정.jpg', clock.t - 8 * MIN], ...base]);
+    await run(w, 6);
+    assert.equal(sent.filter(s => s.src === 'dc').length, 1, '같은 점검 예고가 두 번 나갔음');
+    // 숫자만 다른 서로 다른 버전은 같은 소식으로 오인하면 안 된다
+    routes.dcView = { '1103': dcView('<img src="a.jpg">'), '1104': dcView('<img src="b.jpg">') };
+    routes.dc = dcHtml([[1104, 'Ver.1.042.00.02 패치 예정', clock.t - MIN], [1103, 'Ver.1.042.00.01 패치 내용', clock.t - 3 * MIN], [1102, '내일 10시 점검 및 패치 예정 와일즈', clock.t - 20 * MIN], [1101, '내일 오전 10시 와일즈 점검 및 패치 예정.jpg', clock.t - 30 * MIN], ...base]);
+    await run(w, 6);
+    const titles = sent.filter(s => s.src === 'dc').map(s => s.title);
+    assert.equal(titles.length, 3, titles.join(' | '));
+    record('같은 점검 예고 중복', '버전 없는 같은 점검 예고는 1개만, 버전이 다른 패치 글(.01/.02)은 각각 알림', true);
+});
+
+test('23 같은 업데이트가 디시(제보·중복·공식 링크)·스팀(영문·한글)로 줄줄이 와도 메시지는 한 개다', async () => {
+    const { w } = setup({ init: baseInit() });
+    await run(w, 12);
+    const V = 'Ver.1.042.00.20';
+    const OFF = 'https://info.monsterhunter.com/wilds/update/ko-kr/' + V + '.html';
+    const base = [[100, '기존 와일즈 글', T0 - 3600e3], [99, '아웃랜더스 기존 글', T0 - 7200e3]];
+    routes.dcView = { '1201': dcView('<img src="a.jpg">'), '1202': dcView('<img src="b.jpg">'), '1203': dcView('공식 ' + OFF + ' 확인해 보세요 감사합니다 많이 봐 주세요') };
+    const posts = [];
+    const dcPost = (num, title) => { posts.unshift([num, title, clock.t - MIN]); routes.dc = dcHtml([...posts, ...base]); };
+    dcPost(1201, V + ' 패치 예정.jpg'); await run(w, 5);
+    dcPost(1202, V + ' 패치노트 또 올림.jpg'); await run(w, 5);
+    dcPost(1203, V + ' 패치노트 공개'); await run(w, 5);
+    routes.official = officialHtml([['EN:' + V, '', ['오류 수정'], ['Steam']], ['Ver.1.042.00.03', '', ['오류 수정'], ['Steam']]]);
+    await run(w, 10);
+    routes.official = officialHtml([[V, '', ['오류 수정'], ['Steam']], ['EN:' + V, '', ['오류 수정'], ['Steam']], ['Ver.1.042.00.03', '', ['오류 수정'], ['Steam']]]);
+    await run(w, 10);
+    assert.equal(sent.length, 1, '같은 업데이트가 새 메시지로 ' + sent.length + '번 나감: ' + sent.map(s => s.heading).join(' | '));
+    assert.ok(edits.length >= 1 && edits.length <= 3);
+    record('같은 업데이트가 줄줄이', '디시 제보·중복·공식 링크, 스팀 영문·한글이 차례로 와도 새 메시지는 1개, 나머지는 그 카드 수정', true);
 });
 
 test('17 디시 패치노트 글에 링크 없이 사진뿐이면 디시 제보로 표기하고 버튼(내용 보기)이 디시 원글로 간다', async () => {

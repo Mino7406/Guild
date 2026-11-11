@@ -78,7 +78,7 @@ function buildSources(env = process.env) {
                 return {
                     include: true, kind: c.kind, title: c.titleKo, detail: c.englishOnly ? null : e.summary, note, thumb: OFFICIAL_THUMB,
                     // 이미 디시 기반으로 알린 버전이면 새 메시지 대신 그 카드를 상세 내용으로 고친다
-                    versions: parse.versionsOf(c.titleKo ?? e.title), versionTier: 'official', merge: true,
+                    versions: parse.versionsOf(c.titleKo ?? e.title), versionTier: 'official', merge: true, englishOnly: !!c.englishOnly,
                 };
             },
         },
@@ -121,7 +121,7 @@ function buildSources(env = process.env) {
         load: async () => parse.parseGithubReleases(await fetchText(parse.REFRAMEWORK_API, { Accept: 'application/vnd.github+json' })),
         decide: e => ({
             include: true,
-            kind: { id: 'release', label: '새 릴리즈', emoji: '🧩' },
+            kind: { id: 'release', label: '새 릴리즈' },
             note: [e.tag && e.tag !== e.title ? e.tag : null, e.prerelease ? '프리릴리즈' : null].filter(Boolean).join(' · '),
             detail: e.summary,
         }),
@@ -138,7 +138,7 @@ function buildSources(env = process.env) {
             decide: e => {
                 const c = parse.classifyYoutube(e.title);
                 return c.include
-                    ? { include: true, kind: { id: 'video', label: '새 영상', emoji: '▶️' }, plainLink: true }
+                    ? { include: true, kind: { id: 'video', label: '새 영상' }, plainLink: true }
                     : { include: false, reason: c.reason };
             },
         });
@@ -154,7 +154,7 @@ function dayText(at) {
     return `${d.getUTCMonth() + 1}월 ${d.getUTCDate()}일`;
 }
 
-// 출처별 봇 전용(애플리케이션) 이모지 — deploy/register-emojis.js 가 등록한 이름. 썸네일과 유튜브 머리말에 쓴다.
+// 출처별 봇 전용(애플리케이션) 이모지 — deploy/register-emojis.js 가 등록한 이름. 카드 썸네일에 쓴다(맨 위 소제목 앞에는 이모지를 붙이지 않는다).
 const EMOJI_NAMES = { official: 'news_wilds', dc: 'news_dcinside', youtube: 'news_youtube', reframework: 'news_github' };
 const BUTTON_LABEL = '내용 보기';
 const emojiThumb = id => `https://cdn.discordapp.com/emojis/${id}.png?size=128`;
@@ -168,12 +168,11 @@ function buildPayload(source, entry, verdict, emojiIds = {}) {
     // 유튜브는 카드(컴포넌트 v2) 대신 일반 메시지로 보낸다 — 링크가 디스코드 영상 임베드(재생 가능한 미리보기)로 펼쳐지도록.
     // (컴포넌트 v2 메시지에서는 임베드와 일반 본문을 쓸 수 없다)
     if (verdict.plainLink) {
-        const icon = emojiId ? `<:${EMOJI_NAMES[source.id]}:${emojiId}>` : kind.emoji;
-        return { content: `-# ${icon} ${kind.label} · ${source.label}\n${entry.url}`, allowedMentions: { parse: [] } };
+        return { content: `-# ${kind.label} · ${source.label}\n${entry.url}`, allowedMentions: { parse: [] } };
     }
     const rawTitle = verdict.title ?? entry.title;
     const title = rawTitle.length > 200 ? `${rawTitle.slice(0, 199)}…` : rawTitle;
-    const texts = [`-# ${kind.emoji} ${kind.label} · ${sourceLabel}`, `### ${title}`];
+    const texts = [`-# ${kind.label} · ${sourceLabel}`, `### ${title}`];
     const sub = [source.id === 'official' || verdict.sourceLabel ? null : dayText(entry.at), verdict.note].filter(Boolean).join(' · ');
     if (verdict.detail) texts.push(verdict.detail.slice(0, 300));
     if (sub) texts.push(`-# ${sub}`);
@@ -207,14 +206,35 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
 
     // 다른 출처가 최근 24시간 안에 올린 카드와 제목이 많이 겹치면 같은 소식으로 본다.
     // 같은 출처끼리는 비교하지 않는다(연속된 무기 소개 영상·연속된 패치 버전을 같은 소식으로 오인하지 않도록).
-    function isDuplicate(source, entry) {
+    // sameSource: 같은 출처끼리도 비교한다. 버전 번호가 없는 디시 글(같은 점검 예고를 여러 사람이 올리는 경우)에만 쓴다.
+    // 제목에 버전 번호가 있으면 숫자만 다른 제목(Ver.1.042.00.01 / .02)을 같은 소식으로 오인하므로 버전 규칙으로만 판별한다.
+    function isDuplicate(source, entry, sameSource = false) {
         const tokens = parse.tokenize(entry.title);
+        const hasVer = parse.versionsOf(entry.title).length > 0;
         const t = now();
-        return state.recent.some(r => r.src !== source.id && t - r.at < RECENT_WINDOW_MS && parse.similarTitles(tokens, r.tokens));
+        return state.recent.some(r => (r.src !== source.id || (sameSource && !hasVer && !r.hasVer)) && t - r.at < RECENT_WINDOW_MS && parse.similarTitles(tokens, r.tokens));
     }
     function rememberSent(source, entry) {
-        state.recent.push({ at: now(), src: source.id, tokens: parse.tokenize(entry.title) });
+        state.recent.push({ at: now(), src: source.id, hasVer: parse.versionsOf(entry.title).length > 0, tokens: parse.tokenize(entry.title) });
         state.recent = state.recent.slice(-RECENT_KEEP);
+    }
+    // 같은 업데이트인지: 버전이 정확히 같거나, 한쪽이 다른 쪽의 앞부분(1.042 와 1.042.00.05)이고 36시간 안이면 같은 업데이트로 본다.
+    const FAMILY_WINDOW_MS = 36 * 60 * 60_000;
+    function findCard(versions) {
+        for (const v of versions) if (state.cards[v]) return state.cards[v];
+        const t = now();
+        for (const v of versions) {
+            for (const [k, rec] of Object.entries(state.cards)) {
+                if (t - (rec.at ?? 0) <= FAMILY_WINDOW_MS && (k.startsWith(`${v}.`) || v.startsWith(`${k}.`))) return rec;
+            }
+        }
+        return null;
+    }
+    // 이미 알린 버전인가(공식 등급은 공식으로 알린 것만, 제보 등급은 제보든 공식이든 알렸으면)
+    function knownVersion(v, official) {
+        if (state.versions.includes(`o:${v}`) || (!official && state.versions.includes(`f:${v}`))) return true;
+        const rec = findCard([v]);
+        return !!rec && (rec.tier === 'official' || !official);
     }
     // 글 하나의 분류(decide)가 계속 실패하면(예: 지워진 글의 본문 요청이 404) 뒤의 새 글까지 막히므로 3번 실패하면 포기하고 넘어간다.
     const decideFails = new Map();
@@ -267,8 +287,17 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
             }
             // 스팀 한국어 공지가 이미 디시 기반으로 알린 버전이면, 새 메시지를 보내지 않고 먼저 나간 카드를 상세 내용으로 고친다(같은 정보가 두 번 나가지 않게)
             let forceSend = false;
+            let holdForKo = false;   // 영문뿐이라 나간 공지는 한글판이 올라올 때까지 '본 것'으로 닫지 않는다
+            if (verdict.include && verdict.englishOnly && verdict.versions?.length) {
+                // 같은 업데이트의 카드가 이미 있으면(디시 기반이든 영문 카드든) 영문 내용으로 덮지 않고 한글판을 기다린다
+                const waiting = findCard(verdict.versions);
+                if (waiting) {
+                    if (waiting.merged) mark(e);   // 이미 한글 상세로 갱신됐으면 이 공지는 끝
+                    continue;
+                }
+            }
             if (verdict.include && verdict.merge && verdict.versions?.length) {
-                const rec = verdict.versions.map(v => state.cards[v]).find(Boolean);
+                const rec = findCard(verdict.versions);
                 if (rec?.merged) {
                     logInfo(`${source.label}: 이미 상세로 갱신한 버전이라 건너뜀 — ${e.title}`);
                     mark(e);
@@ -294,20 +323,21 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
             }
             // 같은 버전은 한 번만 알린다. 단, 사진뿐인 제보(fan)가 먼저 나갔어도 뒤에 공식 링크(official)가 확인되면 그건 다시 알린다.
             const official = verdict.versionTier === 'official';
-            if (!forceSend && verdict.include && verdict.versions?.length && verdict.versions.every(v => state.versions.includes(`o:${v}`) || (!official && state.versions.includes(`f:${v}`)))) {
+            if (!forceSend && verdict.include && verdict.versions?.length && verdict.versions.every(v => knownVersion(v, official))) {
                 logInfo(`${source.label}: 이미 알린 버전이라 건너뜀 — ${e.title}`);
-            } else if (verdict.include && !source.noDedup && isDuplicate(source, e)) {
+            } else if (verdict.include && !source.noDedup && isDuplicate(source, e, source.id === 'dc' && !verdict.versions?.length)) {
                 logInfo(`${source.label}: 다른 출처가 이미 올린 소식과 겹쳐 건너뜀 — ${e.title}`);
             } else if (verdict.include) {
                 const messageId = await send(source, e, verdict); // 실패하면 던져서 이 글은 '알림 완료'로 기록되지 않는다
                 if (!source.noDedup) rememberSent(source, e);
                 if (verdict.versions?.length) { state.versions = [...new Set([...state.versions, ...verdict.versions.map(v => `${official ? 'o' : 'f'}:${v}`)])].slice(-60); }
-                for (const v of verdict.versions ?? []) state.cards[v] = { id: messageId ?? null, url: verdict.url ?? null, tier: official ? 'official' : 'fan', merged: verdict.mergeFrom !== 'fan' && !!verdict.merge };
+                for (const v of verdict.versions ?? []) state.cards[v] = { at: now(), id: messageId ?? null, url: verdict.url ?? null, tier: official ? 'official' : 'fan', merged: verdict.mergeFrom !== 'fan' && !!verdict.merge && !verdict.englishOnly };   // 영문뿐이라 나간 카드는 한글판이 올라오면 한 번 갱신한다
                 const cardKeys = Object.keys(state.cards);
                 for (const k of cardKeys.slice(0, Math.max(0, cardKeys.length - 30))) delete state.cards[k];
+                if (verdict.englishOnly) holdForKo = true;
                 sent++;
             }
-            mark(e);
+            if (!holdForKo) mark(e);
         }
         return sent;
     }
@@ -440,7 +470,7 @@ async function buildSamples(sources, now = Date.now()) {
     };
     const ago = m => now - m * 60_000;
     const DC_URL = 'https://gall.dcinside.com/mgallery/board/view/?id=capcommh&no=1522725'; // 실제 글(버튼을 눌러도 열리도록)
-    const dcEntry = (title, mins) => ({ key: 'dc-sample', title, url: DC_URL, at: ago(mins), num: 1 });
+    const dcEntry = (title, mins) => ({ key: 'dc-sample', title: parse.cleanDcTitle(title), url: DC_URL, at: ago(mins), num: 1 });
     const dcHtml = inner => `<div class="write_div"><div>${inner}</div></div><div class="btn_recommend_box"></div>`;
     const io = html => ({ fetchText: async () => html });
 

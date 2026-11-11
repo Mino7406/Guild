@@ -33,6 +33,15 @@ test('디시 제목의 HTML 기호(10진수·16진수·&amp;)를 글자로 바�
     assert.equal(p.parseDcList(html)[0].title, '🔗알슈베르도 & 챌린지 🔗');
 });
 
+test('디시 제목 끝의 이미지 확장자(.jpg 등)를 뗀다', () => {
+    assert.equal(p.cleanDcTitle('내일 오전 10시 와일즈 점검 및 패치 예정.jpg'), '내일 오전 10시 와일즈 점검 및 패치 예정');
+    assert.equal(p.cleanDcTitle('Ver.1.043 패치노트 .PNG '), 'Ver.1.043 패치노트');
+    assert.equal(p.cleanDcTitle('파일.jpeg.gif'), '파일.jpeg');
+    assert.equal(p.cleanDcTitle('Ver.1.042 패치'), 'Ver.1.042 패치');   // 버전 번호의 점은 건드리지 않음
+    const html = row('7', '공식', '몬헌 와일즈 사냥왕 결정전 챔피언십 우승자.jpg', '2026-11-11 10:05:05');
+    assert.equal(p.parseDcList(html)[0].title, '몬헌 와일즈 사냥왕 결정전 챔피언십 우승자');
+});
+
 test('디시 분류', () => {
     const c = t => p.classifyTitle(t);
     assert.equal(c('내일 오전 10시 와일즈 점검 및 패치 예정.jpg').action, 'include');
@@ -110,7 +119,7 @@ test('요청이 실패하면 오류 사유를 짧게 덧붙이고, JSON 이 아�
 test('테스트 미리보기: 출처별 최근 알림 대상만 시간순으로 올리고, 운영 기록은 건드리지 않는다', async () => {
     const { previewRecent, collectRecent } = require('../news/watcher');
     const mkSrc = (id, label, entries, decide, fail = false) => ({ id, label, load: async () => { if (fail) throw new Error('HTTP 403'); return entries; }, decide });
-    const kind = { id: 'patch', label: '패치노트', emoji: 'E' };
+    const kind = { id: 'patch', label: '패치노트' };
     const yes = () => ({ include: true, kind });
     const e = (key, title, at) => ({ key, title, url: 'https://x/' + key, at, tags: [], summary: '' });
     const a = mkSrc('official', 'A', [e('1', '가', 100), e('2', '나', 300), e('3', '다', 200), e('4', '라', 400)], ent => ent.key === '4' ? { include: false } : yes());
@@ -166,12 +175,12 @@ test('모든 카드의 버튼은 하나이고 이름은 "내용 보기"로 통�
     const walkButtons = payload => { const out = []; (function walk(x) { if (!x || typeof x !== 'object') return; if (x.url && x.label) out.push(x); Object.values(x).forEach(walk); })(payload.components[0].toJSON()); return out; };
     const entry = { title: '제목', url: 'https://example.com/x', at: 1, tags: [], summary: '' };
     for (const id of ['official', 'dc', 'reframework']) {
-        const b = walkButtons(buildPayload(sources[id], entry, { include: true, kind: { label: 'k', emoji: 'E' } }, { [id]: '1' }));
+        const b = walkButtons(buildPayload(sources[id], entry, { include: true, kind: { label: 'k' } }, { [id]: '1' }));
         assert.deepEqual(b.map(x => x.label), ['내용 보기'], id);
         assert.equal(b[0].url, 'https://example.com/x');
     }
     // 판정이 주소를 바꾼 경우(디시 글의 공식 링크)에도 버튼은 하나
-    const b = walkButtons(buildPayload(sources.dc, entry, { include: true, kind: { label: 'k', emoji: 'E' }, url: 'https://info.monsterhunter.com/wilds/update/ko-kr/Ver.1.042.00.05.html', sourceLabel: 'Update Information', emojiSource: 'official' }, { official: '1' }));
+    const b = walkButtons(buildPayload(sources.dc, entry, { include: true, kind: { label: 'k' }, url: 'https://info.monsterhunter.com/wilds/update/ko-kr/Ver.1.042.00.05.html', sourceLabel: 'Update Information', emojiSource: 'official' }, { official: '1' }));
     assert.deepEqual(b.map(x => [x.label, x.url]), [['내용 보기', 'https://info.monsterhunter.com/wilds/update/ko-kr/Ver.1.042.00.05.html']]);
 });
 
@@ -184,18 +193,23 @@ test('출처별 이모지·썸네일 매칭', () => {
     const entry = { title: '제목', url: 'https://example.com/x', at: 1, kinds: [], platforms: [], summary: '' };
     const thumbOf = (src) => {
         const e = sources[src];
-        const v = { include: true, kind: { label: 'k', emoji: 'E' }, ...(src === 'youtube' ? { plainLink: true } : {}) };
+        const v = { include: true, kind: { label: 'k' }, ...(src === 'youtube' ? { plainLink: true } : {}) };
         const payload = buildPayload(e, entry, v, ids);
         return payload.content ?? payload.components[0].toJSON().components[0].accessory.media.url;
     };
     assert.match(thumbOf('official'), /emojis\/111\.png/);
     assert.match(thumbOf('dc'), /emojis\/222\.png/);
     assert.match(thumbOf('reframework'), /emojis\/444\.png/);
-    assert.match(thumbOf('youtube'), /<:news_youtube:333>/); // 유튜브는 임베드가 있어 머리말에 로고 이모지
+    // 유튜브는 영상 임베드가 있는 일반 메시지: 맨 위 소제목 앞에 이모지를 붙이지 않는다(이모지 id가 있어도 마찬가지)
+    assert.equal(thumbOf('youtube'), '-# k · 캡콤아시아 유튜브\nhttps://example.com/x');
+    for (const id of ['official', 'dc', 'reframework']) {
+        const head = buildPayload(sources[id], entry, { include: true, kind: { label: '패치노트' } }, { [id]: '1' }).components[0].toJSON().components[0].components[0].content;
+        assert.ok(/^-# 패치노트 · /.test(head) && !/\p{Extended_Pictographic}/u.test(head), `${id}: ${head}`);
+    }
     // 이모지가 아직 없으면 예전 방식으로 보낸다(공식은 공식 이미지, 유튜브는 기본 이모지)
-    const off = buildPayload(sources.official, entry, { include: true, kind: { label: 'k', emoji: 'E' }, thumb: 'https://x/share.png' }, {});
+    const off = buildPayload(sources.official, entry, { include: true, kind: { label: 'k' }, thumb: 'https://x/share.png' }, {});
     assert.equal(off.components[0].toJSON().components[0].accessory.media.url, 'https://x/share.png');
-    assert.match(buildPayload(sources.youtube, entry, { include: true, kind: { label: 'k', emoji: 'E' }, plainLink: true }, {}).content, /^-# E k/);
+    assert.match(buildPayload(sources.youtube, entry, { include: true, kind: { label: 'k' }, plainLink: true }, {}).content, /^-# k · /);
 });
 
 test('스팀 한국어 공지 파싱·분류: 한글 패치·점검만 올리고, 영문만 있으면 한글판을 기다린다', () => {

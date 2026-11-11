@@ -39,6 +39,8 @@ function parseOfficialList(html) {
 
 // ── 디시 몬갤 "공식" 말머리 목록 ────────────────────────────────────────────────
 // 글 번호가 숫자가 아닌 줄(광고·설문·공지)은 뺀다.
+// 디시 제목은 사진 파일 이름이 그대로 붙는 경우가 많다(예: "...예정.jpg"). 알림에는 확장자를 빼고 보여 준다.
+const cleanDcTitle = t => String(t).replace(/\s*\.(?:jpe?g|png|gif|webp|bmp)\s*$/i, '').trim();
 function parseDcList(html) {
     const out = [];
     // 행 시작 표식으로 나눈다(닫히지 않는 이상한 응답에서도 한 번만 훑도록 — 정규식으로 </tr>까지 찾으면 느려질 수 있음)
@@ -48,7 +50,7 @@ function parseDcList(html) {
         const num = stripTags(row.match(/class="gall_num"[^>]*>([\s\S]*?)<\/td>/)?.[1] ?? '');
         if (!/^\d+$/.test(num)) continue;
         const a = row.match(/class="gall_tit[^"]*"[^>]*>[\s\S]*?<a [^>]*>([\s\S]*?)<\/a>/);
-        const title = a ? stripTags(a[1]) : '';
+        const title = a ? cleanDcTitle(stripTags(a[1])) : '';
         if (!title) continue;
         const date = row.match(/class="gall_date"[^>]*title="([^"]+)"/)?.[1];
         const at = date ? Date.parse(date.replace(' ', 'T') + '+09:00') : NaN;
@@ -96,15 +98,15 @@ const EVENT_RE = /게임\s*위크|게임위크|서머\s*게임|서머게임|게�
 
 // 종류(위에서부터 먼저 맞는 것)
 const KINDS = [
-    { id: 'maintenance', label: '점검 예고', emoji: '🛠️', re: /점검/ },
-    { id: 'patch',       label: '패치·업데이트', emoji: '📢', re: /패치|업데이트|\bTU\b|버전|Ver\.?\s*\d/i },
-    { id: 'eventquest',  label: '이벤트 퀘스트', emoji: '🎯', re: /이벤트\s*퀘|배포\s*퀘|챌린지/ },
-    { id: 'content',     label: '신규 콘텐츠', emoji: '🆕', re: /신규|신\s*몬스터|DLC|추가\s*몬스터|체험판|공개/i },
-    { id: 'broadcast',   label: '방송·행사 일정', emoji: '📺', re: /방송|생방|라이브|프렌즈|발표|일정/ },
-    { id: 'goods',       label: '판매량·굿즈', emoji: '🎁', re: /판매량|굿즈|인형|피규어|콜라보|실적|\d+\s*만\s*장/ },
+    { id: 'maintenance', label: '점검 예고', re: /점검/ },
+    { id: 'patch',       label: '패치·업데이트', re: /패치|업데이트|\bTU\b|버전|Ver\.?\s*\d/i },
+    { id: 'eventquest',  label: '이벤트 퀘스트', re: /이벤트\s*퀘|배포\s*퀘|챌린지/ },
+    { id: 'content',     label: '신규 콘텐츠', re: /신규|신\s*몬스터|DLC|추가\s*몬스터|체험판|공개/i },
+    { id: 'broadcast',   label: '방송·행사 일정', re: /방송|생방|라이브|프렌즈|발표|일정/ },
+    { id: 'goods',       label: '판매량·굿즈', re: /판매량|굿즈|인형|피규어|콜라보|실적|\d+\s*만\s*장/ },
 ];
-const EVENT_KIND = { id: 'event', label: '행사 참여', emoji: '🎪' };
-const GENERAL_KIND = { id: 'news', label: '일반 소식', emoji: '📰' };
+const EVENT_KIND = { id: 'event', label: '행사 참여' };
+const GENERAL_KIND = { id: 'news', label: '일반 소식' };
 
 function kindOf(title) {
     return KINDS.find(k => k.re.test(title)) ?? GENERAL_KIND;
@@ -157,8 +159,8 @@ function classifyYoutube(title) {
 // 공식 업데이트 사이트(info.monsterhunter.com)가 서버 접속을 막아서, 같은 공지를 스팀의 공개 이벤트·공지 목록(한국어, l=koreana)으로 받는다.
 // 한글 번역이 아직 안 올라온 영문 공지는 올리지 않고 기다렸다가, 한글판이 올라오면 올린다(defer).
 const STEAM_EVENTS_API = 'https://store.steampowered.com/events/ajaxgetpartnereventspageable/?clan_accountid=0&appid=2246340&offset=0&count=15&l=koreana&origin=https://store.steampowered.com';
-const PATCH_KIND = { id: 'patch', label: '패치노트', emoji: '📢' };
-const MAINT_KIND = { id: 'maintenance', label: '점검 예고', emoji: '🛠️' };
+const PATCH_KIND = { id: 'patch', label: '패치노트' };
+const MAINT_KIND = { id: 'maintenance', label: '점검 예고' };
 function cleanSteamText(s) {
     return String(s ?? '')
         .replace(/\[\/?[a-z0-9*]+[^\]]*\]/gi, ' ')   // [h3] [url=…] 같은 서식 표시
@@ -286,7 +288,7 @@ function confirmBody(body) {
 }
 
 module.exports = {
-    parseOfficialList, parseDcList, parseDcBody, parseYoutubePlaylist, parseGithubReleases, REFRAMEWORK_API,
+    cleanDcTitle, parseOfficialList, parseDcList, parseDcBody, parseYoutubePlaylist, parseGithubReleases, REFRAMEWORK_API,
     parseSteamEvents, classifySteam, STEAM_EVENTS_API, findOfficialUpdateLink, versionsOf,
     classifyTitle, confirmBody, classifyYoutube, kindOf, tokenize, similarTitles,
     EVENT_KIND, GENERAL_KIND, OFFICIAL_BASE, YT_UPLOADS_PLAYLIST, KST_MS,
