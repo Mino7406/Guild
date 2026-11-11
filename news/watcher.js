@@ -99,11 +99,11 @@ function buildSources(env = process.env) {
                         return {
                             include: true, kind: c.kind, title: `업데이트 개요 (Ver.${link.version})`, sourceLabel: 'Update Information', emojiSource: 'official',
                             url: link.url, note: '디시 제보로 먼저 확인 · 공식 페이지 링크 포함', button: '공식 패치노트 보기',
-                            extraButtons: [{ label: '디시 원글', url: e.url }], versions: [link.version],
+                            extraButtons: [{ label: '디시 원글', url: e.url }], versions: [link.version], versionTier: 'official',
                         };
                     }
                     // 링크 없이 사진뿐이면 버튼을 디시 원글로 건다
-                    return { include: true, kind: c.kind, button: '디시 원글 보기', versions: parse.versionsOf(e.title) };
+                    return { include: true, kind: c.kind, button: '디시 원글 보기', versions: parse.versionsOf(e.title), versionTier: 'fan' };
                 }
                 return { include: true, kind: c.kind, button: '디시 원글 보기' };
             },
@@ -259,14 +259,16 @@ function createWatcher({ sources, store, send, now = Date.now, logFail = () => {
                 if (!deferLogged.has(e.key)) { deferLogged.add(e.key); logInfo(`${source.label}: 한글판을 기다리는 중 — ${e.title}`); }
                 continue;
             }
-            if (verdict.include && verdict.versions?.length && verdict.versions.every(v => state.versions.includes(v))) {
+            // 같은 버전은 한 번만 알린다. 단, 사진뿐인 제보(fan)가 먼저 나갔어도 뒤에 공식 링크(official)가 확인되면 그건 다시 알린다.
+            const official = verdict.versionTier === 'official';
+            if (verdict.include && verdict.versions?.length && verdict.versions.every(v => state.versions.includes(`o:${v}`) || (!official && state.versions.includes(`f:${v}`)))) {
                 logInfo(`${source.label}: 이미 알린 버전이라 건너뜀 — ${e.title}`);
             } else if (verdict.include && !source.noDedup && isDuplicate(source, e)) {
                 logInfo(`${source.label}: 다른 출처가 이미 올린 소식과 겹쳐 건너뜀 — ${e.title}`);
             } else if (verdict.include) {
                 await send(source, e, verdict); // 실패하면 던져서 이 글은 '알림 완료'로 기록되지 않는다
                 if (!source.noDedup) rememberSent(source, e);
-                if (verdict.versions?.length) { state.versions = [...new Set([...state.versions, ...verdict.versions])].slice(-40); }
+                if (verdict.versions?.length) { state.versions = [...new Set([...state.versions, ...verdict.versions.map(v => `${official ? 'o' : 'f'}:${v}`)])].slice(-60); }
                 sent++;
             }
             mark(e);

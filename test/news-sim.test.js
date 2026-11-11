@@ -354,6 +354,24 @@ test('16 디시 패치노트 글에 공식 페이지 링크가 있으면 공식�
     record('디시 패치노트(공식 링크 있음)', '공식으로 표기, 버튼=공식 페이지·디시 원글, 같은 버전 중복 글은 건너뜀, 뒤이어 스팀 상세 공지', true);
 });
 
+test('16b 사진뿐인 제보가 먼저 나가도, 같은 버전의 공식 링크 글이 뒤에 올라오면 공식 카드로 다시 알린다', async () => {
+    const { w } = setup({ init: baseInit() });
+    await run(w, 12);
+    const OFF = 'https://info.monsterhunter.com/wilds/update/ko-kr/Ver.1.042.00.09.html';
+    routes.dcView = { '801': dcView('<img src="a.jpg">'), '802': dcView('공식 페이지 ' + OFF + ' 입니다 확인해 보세요 감사합니다 많이 봐 주세요') };
+    const base = [[100, '기존 와일즈 글', T0 - 3600e3], [99, '아웃랜더스 기존 글', T0 - 7200e3]];
+    routes.dc = dcHtml([[801, 'Ver.1.042.00.09 패치 예정.jpg', clock.t - MIN], ...base]);
+    await run(w, 6);
+    routes.dc = dcHtml([[802, 'Ver.1.042.00.09 패치노트 공개', clock.t - MIN], [801, 'Ver.1.042.00.09 패치 예정.jpg', clock.t - 7 * MIN], ...base]);
+    await run(w, 6);
+    const d = sent.filter(s => s.src === 'dc');
+    assert.equal(d.length, 2, d.map(x => x.heading).join(' | '));
+    assert.ok(d[0].lines[0].includes('몬스터헌터 시리즈 갤러리 ⓜ'));   // 먼저: 제보
+    assert.ok(d[1].lines[0].includes('Update Information'));          // 뒤에: 공식 링크 확인
+    assert.equal(d[1].buttons[0].url, OFF);
+    record('제보 → 공식 링크 확인', '사진뿐인 제보가 먼저 나가고, 공식 링크 글이 뒤에 오면 공식 카드로 한 번 더 알림', true);
+});
+
 test('17 디시 패치노트 글에 링크 없이 사진뿐이면 디시 제보로 표기하고 버튼을 디시 원글로 건다', async () => {
     const { w } = setup({ init: baseInit() });
     await run(w, 12);
