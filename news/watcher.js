@@ -83,6 +83,8 @@ async function downloadImage(url) {
 // ── 출처 정의 ──────────────────────────────────────────────────
 // load(): 글 목록. decide(entry): { include, kind?, note? } 또는 Promise. maxFresh: 한 번에 이보다 많은 새 글이 보이면 구조 변경으로 본다.
 const DC_LIST = 'https://gall.dcinside.com/mgallery/board/lists/?id=capcommh&sort_type=N&search_head=140&page=1';
+// 개념글(말머리 구분 없이 추천을 많이 받은 글) 목록: [공식] 말머리가 아닌 [일반] 글(예: 새 곡 공개)이라도 개념글이 되면 알리기 위해 함께 본다.
+const DC_BEST_LIST = 'https://gall.dcinside.com/mgallery/board/lists/?id=capcommh&sort_type=N&exception_mode=recommend&page=1';
 
 function buildSources(env = process.env) {
     const sources = [
@@ -135,6 +137,14 @@ function buildSources(env = process.env) {
             },
         },
     ];
+    // 디시 개념글: 공식 말머리 목록과 같은 분류 규칙을 쓰고, 같은 소식은 기존 중복 방지가 거른다.
+    // 처음 켤 때 최근 12시간 안의 글은 '이미 본 글'로 치지 않고 규칙에 따라 판단한다(이번에 놓친 글을 알리기 위해).
+    const dcSource = sources.find(x => x.id === 'dc');
+    sources.splice(sources.indexOf(dcSource) + 1, 0, {
+        ...dcSource, id: 'dcbest', pollMs: 5 * 60_000, maxFresh: 5, seedAnnounceMs: 12 * 60 * 60_000,
+        load: async () => parse.parseDcList(await fetchText(DC_BEST_LIST)),
+        decide: async (e, io) => { const v = await dcSource.decide(e, io); return v.include ? { ...v, emojiSource: v.emojiSource ?? 'dc' } : v; },
+    });
     // REFramework 새 릴리즈: 와일즈 모드 도구라 새 빌드가 나오면 바로 알린다. 다른 출처와 겹칠 일이 없어 중복 검사는 하지 않는다.
     // (GitHub 무인증 한도는 시간당 60회 — 5분마다 확인하면 12회)
     sources.push({
@@ -279,13 +289,15 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
         const entries = await source.load();
         if (!entries.length) throw new EmptyListError('목록이 비어 있음(사이트 구조가 바뀌었을 수 있음)');
         const st = state[source.id] ??= { seeded: false, seen: [] };
-        const seen = new Set(st.seen);
         if (!st.seeded) {
-            st.seen = entries.map(e => e.key).slice(-MAX_SEEN);
+            // 처음 확인: 보통은 지금 있는 글을 모두 '본 글'로 기억만 한다. seedAnnounceMs 가 있는 출처는 그 시간 안에 올라온 글을 남겨 두어 아래 규칙으로 판단한다.
+            const keep = e => source.seedAnnounceMs && e.at != null && now() - e.at < source.seedAnnounceMs;
+            st.seen = entries.filter(e => !keep(e)).map(e => e.key).slice(-MAX_SEEN);
             st.seeded = true;
             store.save();
-            return 0;
+            if (!entries.some(keep)) return 0;
         }
+        const seen = new Set(st.seen);
         const fresh = entries.filter(e => !seen.has(e.key)).sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
         if (!fresh.length) return 0;
         const mark = e => { seen.add(e.key); st.seen = [...seen].slice(-MAX_SEEN); store.save(); };
@@ -358,7 +370,7 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
             const official = verdict.versionTier === 'official';
             if (!forceSend && verdict.include && verdict.versions?.length && verdict.versions.every(v => knownVersion(v, official))) {
                 logInfo(`${source.label}: 이미 알린 버전이라 건너뜀 — ${e.title}`);
-            } else if (verdict.include && !source.noDedup && isDuplicate(source, e, source.id === 'dc' && !verdict.versions?.length)) {
+            } else if (verdict.include && !source.noDedup && isDuplicate(source, e, (source.id === 'dc' || source.id === 'dcbest') && !verdict.versions?.length)) {
                 logInfo(`${source.label}: 다른 출처가 이미 올린 소식과 겹쳐 건너뜀 — ${e.title}`);
             } else if (verdict.include) {
                 // 자동짤방 거르기: 제외 목록의 작성자거나, 같은 작성자가 같은 사진을 전에도 썼으면 사진을 붙이지 않는다

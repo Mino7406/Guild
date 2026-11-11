@@ -34,12 +34,13 @@ function setup({ youtube = true, init = {} } = {}) {
     edits = [];
     sendFail = 0;
     updateFail = false;
-    routes = { official: officialHtml([['Ver.1.042.00.03', '2026년 10월 27일(화)', ['오류 수정'], ['PS5', 'Steam']]]), dc: dcHtml([]), yt: ytJson([]), gh: ghJson([]), dcView: {} };
+    routes = { official: officialHtml([['Ver.1.042.00.03', '2026년 10월 27일(화)', ['오류 수정'], ['PS5', 'Steam']]]), dc: dcHtml([]), dcBest: dcHtml([[90, '오래된 와일즈 개념글', T0 - 40 * 3600e3]]), yt: ytJson([]), gh: ghJson([]), dcView: {} };
     Object.assign(routes, init);
     global.fetch = async (url) => {
         url = String(url);
         const key = url.includes('store.steampowered.com') ? 'official'
             : url.includes('gall.dcinside.com') && url.includes('/view/') ? 'dcView'
+            : url.includes('gall.dcinside.com') && url.includes('exception_mode=recommend') ? 'dcBest'
             : url.includes('gall.dcinside.com') ? 'dc'
             : url.includes('googleapis.com') ? 'yt'
             : url.includes('api.github.com') ? 'gh' : 'other';
@@ -119,6 +120,30 @@ test('01 처음 켤 때는 기존 글을 기억만 하고 아무것도 올리지
     assert.equal(sent.length, 0);
     assert.ok(calls.official >= 1 && calls.dc >= 1 && calls.yt >= 1 && calls.gh >= 1);
     record('처음 켜기(기존 글 도배 방지)', '기존 글은 기억만, 카드 0개', true);
+});
+
+// 개념글(말머리 구분 없이 추천 많이 받은 글) 출처
+test('01b 개념글 출처: 켤 때 12시간 안의 글은 규칙대로 판단해 올리고, 오래된 글은 기억만 한다', async () => {
+    const { w } = setup({ init: { ...baseInit(), dcBest: dcHtml([[1537009, '어센던스 메인테마곡 풀버전 드디어 공개', T0 - 30 * MIN], [90, '오래된 와일즈 개념글', T0 - 40 * 3600e3], [91, '잡담 글입니다', T0 - 20 * MIN]]) } });
+    routes.dcView = { '1537009': dcView('어센던스 메인테마곡 순환하는 바람을 엮으며 오케스트라 버전이 공개됨') };
+    await run(w, 12);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].src, 'dcbest');
+    assert.equal(sent[0].title, '어센던스 메인테마곡 풀버전 드디어 공개');
+    assert.equal(sent[0].kind, '신규 콘텐츠');
+    record('개념글 출처(일반 말머리 글)', '[일반] 글도 개념글이면 알림 1개, 와일즈와 무관한 글·오래된 글은 제외', true);
+});
+
+test('01c 개념글 출처: 공식 말머리 글이 개념글에도 올라와도 한 번만 알린다', async () => {
+    const { w } = setup({ init: baseInit() });
+    await run(w, 12);
+    const row = [301, '와일즈 어센던스 게임스컴 참여 일정 안내', clock.t - 1 * MIN];
+    routes.dcView = { '301': dcView('게임스컴 어센던스 참여 일정 몬스터헌터 어센던스 방송 안내 시청 부탁드립니다 감사합니다') };
+    routes.dc = dcHtml([row, [100, '기존 와일즈 글', T0 - 3600e3]]);
+    routes.dcBest = dcHtml([row, [90, '오래된 와일즈 개념글', T0 - 40 * 3600e3]]);
+    await run(w, 15);
+    assert.equal(sent.length, 1);
+    record('개념글 중복 방지', '공식 말머리와 개념글에 모두 떠도 알림은 1개', true);
 });
 
 test('02 공식 새 버전이 올라오면 카드 1개, 다시 확인해도 중복 없음', async () => {

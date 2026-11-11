@@ -116,7 +116,7 @@ const EVENT_RE = /게임\s*위크|게임위크|서머\s*게임|서머게임|게�
 // 종류(위에서부터 먼저 맞는 것)
 const KINDS = [
     { id: 'maintenance', label: '점검 예고', re: /점검/ },
-    { id: 'patch',       label: '패치·업데이트', re: /패치|업데이트|\bTU\b|버전|Ver\.?\s*\d/i },
+    { id: 'patch',       label: '패치·업데이트', re: /패치|업데이트|\bTU\b|(?<![가-힣])버전|Ver\.?\s*\d/i },
     { id: 'eventquest',  label: '이벤트 퀘스트', re: /이벤트\s*퀘|배포\s*퀘|챌린지/ },
     { id: 'content',     label: '신규 콘텐츠', re: /신규|신\s*몬스터|DLC|추가\s*몬스터|체험판|공개/i },
     { id: 'broadcast',   label: '방송·행사 일정', re: /방송|생방|라이브|프렌즈|발표|일정/ },
