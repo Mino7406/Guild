@@ -11,7 +11,7 @@ const MIN = 60_000;
 const results = [];
 
 // ── 가짜 환경 ─────────────────────────────────────────────────
-let clock, routes, calls, sent, sendFail;
+let clock, routes, calls, sent, sendFail, edits, updateFail;
 const realFetch = global.fetch;
 function kst(ms) { return new Date(ms + 9 * 3600e3).toISOString().slice(0, 19).replace('T', ' '); }
 
@@ -31,7 +31,9 @@ function setup({ youtube = true, init = {} } = {}) {
     clock = { t: T0 };
     calls = {};
     sent = [];
+    edits = [];
     sendFail = 0;
+    updateFail = false;
     routes = { official: officialHtml([['Ver.1.042.00.03', '2026년 10월 27일(화)', ['오류 수정'], ['PS5', 'Steam']]]), dc: dcHtml([]), yt: ytJson([]), gh: ghJson([]), dcView: {} };
     Object.assign(routes, init);
     global.fetch = async (url) => {
@@ -60,6 +62,15 @@ function setup({ youtube = true, init = {} } = {}) {
             const lines = payload.content !== undefined ? [payload.content] : flatten(payload.components[0]);
             const buttons = []; (function walk(x) { if (!x || typeof x !== 'object') return; if (x.url && x.label) buttons.push({ label: x.label, url: x.url }); Object.values(x).forEach(walk); })(payload.components?.[0]?.toJSON());
             sent.push({ buttons, heading: lines[1] ?? '', src: source.id, title: entry.title, kind: verdict.kind.label, emoji: verdict.kind.emoji, lines, button: verdict.button ?? '내용 보기', thumb: !!verdict.thumb, url: entry.url, plain: payload.content !== undefined, flags: payload.flags ?? 0 });
+            return 'm' + sent.length;
+        },
+        // 먼저 나간 카드를 고치는 동작(실제 코드와 같은 방식으로 카드를 다시 만든다)
+        update: async (source, entry, verdict, rec) => {
+            if (updateFail) throw new Error('Unknown Message');
+            const payload = buildPayload(source, entry, { ...verdict, url: rec.url ?? verdict.url }, { official: '1', dc: '2', youtube: '3', reframework: '4' });
+            const lines = flatten(payload.components[0]);
+            const buttons = []; (function walk(x) { if (!x || typeof x !== 'object') return; if (x.url && x.label) buttons.push({ label: x.label, url: x.url }); Object.values(x).forEach(walk); })(payload.components[0].toJSON());
+            edits.push({ id: rec.id, heading: lines[1] ?? '', lines, buttons });
         },
         logInfo: m => (setup.logs ??= []).push(m),
         logFail: (s, e) => (setup.fails ??= []).push(`${s.id}:${e.message}`),
@@ -346,11 +357,16 @@ test('16 디시 패치노트 글에 공식 페이지 링크가 있으면 공식�
     assert.deepEqual(d[0].buttons.map(b => b.label), ['내용 보기']);   // 버튼은 하나, 이름은 '내용 보기'
     assert.equal(d[0].buttons[0].url, OFF);                           // 공식 페이지로 간다
     assert.ok(setup.logs.some(m => m.includes('이미 알린 버전')));
-    // 뒤늦게 스팀 한국어 공지가 올라오면 자세한 내용으로 이어서 알린다
+    // 뒤늦게 스팀 한국어 공지가 올라오면 새 메시지를 보내지 않고, 먼저 나간 카드를 자세한 내용으로 고친다
     routes.official = officialHtml([['Ver.1.042.00.05', '', ['오류 수정'], ['Steam']], ['Ver.1.042.00.03', '', ['오류 수정'], ['Steam']]]);
     await run(w, 10);
-    assert.equal(sent.filter(s => s.src === 'official').length, 1);
-    record('디시 패치노트(공식 링크 있음)', '공식으로 표기, 버튼(내용 보기)=공식 페이지, 같은 버전 중복 글은 건너뜀, 뒤이어 스팀 상세 공지', true);
+    assert.equal(sent.filter(s => s.src === 'official').length, 0, '같은 정보를 새 메시지로 또 보내면 안 됨');
+    assert.equal(edits.length, 1);
+    assert.equal(edits[0].id, 'm1');
+    assert.equal(edits[0].heading, '### 업데이트 개요 (Ver.1.042.00.05)');
+    assert.ok(edits[0].lines.join(' ').includes('배포일') && edits[0].lines.join(' ').includes('오류 수정'), edits[0].lines.join(' | '));
+    assert.equal(edits[0].buttons[0].url, OFF, '먼저 나간 카드의 공식 링크를 유지');
+    record('디시 패치노트(공식 링크 있음)', '공식으로 표기, 버튼=공식 페이지, 같은 버전 중복 글은 건너뜀, 뒤이은 스팀 상세는 새 메시지 없이 먼저 나간 카드를 갱신', true);
 });
 
 test('16b 사진뿐인 제보가 먼저 나가도, 같은 버전의 공식 링크 글이 뒤에 올라오면 공식 카드로 다시 알린다', async () => {
@@ -364,11 +380,69 @@ test('16b 사진뿐인 제보가 먼저 나가도, 같은 버전의 공식 링�
     routes.dc = dcHtml([[802, 'Ver.1.042.00.09 패치노트 공개', clock.t - MIN], [801, 'Ver.1.042.00.09 패치 예정.jpg', clock.t - 7 * MIN], ...base]);
     await run(w, 6);
     const d = sent.filter(s => s.src === 'dc');
-    assert.equal(d.length, 2, d.map(x => x.heading).join(' | '));
-    assert.ok(d[0].lines[0].includes('몬스터헌터 시리즈 갤러리 ⓜ'));   // 먼저: 제보
-    assert.ok(d[1].lines[0].includes('Update Information'));          // 뒤에: 공식 링크 확인
-    assert.equal(d[1].buttons[0].url, OFF);
-    record('제보 → 공식 링크 확인', '사진뿐인 제보가 먼저 나가고, 공식 링크 글이 뒤에 오면 공식 카드로 한 번 더 알림', true);
+    assert.equal(d.length, 1, '같은 패치를 새 메시지로 또 보내면 안 됨: ' + d.map(x => x.heading).join(' | '));
+    assert.ok(d[0].lines[0].includes('몬스터헌터 시리즈 갤러리 ⓜ'));   // 먼저 나간 것: 제보 카드
+    assert.equal(edits.length, 1);                                   // 공식 링크가 확인되면 그 카드를 공식 카드로 고친다
+    assert.equal(edits[0].id, 'm1');
+    assert.ok(edits[0].lines[0].includes('Update Information'), edits[0].lines[0]);
+    assert.equal(edits[0].heading, '### 업데이트 개요 (Ver.1.042.00.09)');
+    assert.equal(edits[0].buttons[0].url, OFF);
+    // 카드를 고친 뒤에 같은 버전의 중복 글이 또 올라와도 새 메시지로 나가면 안 된다
+    routes.dcView['803'] = dcView('같은 패치노트 ' + OFF + ' 또 올립니다 확인해 보세요 감사합니다 많이 봐 주세요');
+    routes.dc = dcHtml([[803, 'Ver.1.042.00.09 패치노트 또 올림', clock.t - MIN], [802, 'Ver.1.042.00.09 패치노트 공개', clock.t - 7 * MIN], [801, 'Ver.1.042.00.09 패치 예정.jpg', clock.t - 13 * MIN], ...base]);
+    await run(w, 6);
+    assert.equal(sent.filter(s => s.src === 'dc').length, 1, '중복 글이 새 메시지로 나갔음');
+    assert.equal(edits.length, 1);
+    record('제보 → 공식 링크 확인', '사진뿐인 제보 카드가 먼저 나가고, 공식 링크 글이 뒤에 오면 새 메시지 없이 그 카드를 공식 카드로 갱신', true);
+});
+
+test('18 사진뿐인 디시 제보 카드도 같은 버전의 스팀 상세가 오면 새 메시지 없이 그 카드를 갱신하고 버튼이 스팀 공지로 바뀐다', async () => {
+    const { w } = setup({ init: baseInit() });
+    await run(w, 12);
+    routes.dcView = { '901': dcView('<img src="a.jpg">') };
+    routes.dc = dcHtml([[901, 'Ver.1.042.00.10 패치노트.jpg', clock.t - MIN], [100, '기존 와일즈 글', T0 - 3600e3], [99, '아웃랜더스 기존 글', T0 - 7200e3]]);
+    await run(w, 6);
+    assert.equal(sent.filter(s => s.src === 'dc').length, 1);
+    routes.official = officialHtml([['Ver.1.042.00.10', '', ['오류 수정'], ['Steam']], ['Ver.1.042.00.03', '', ['오류 수정'], ['Steam']]]);
+    await run(w, 10);
+    assert.equal(sent.filter(s => s.src === 'official').length, 0, '새 메시지를 또 보내면 안 됨');
+    assert.equal(edits.length, 1);
+    assert.equal(edits[0].id, 'm1');
+    assert.ok(edits[0].lines[0].includes('Update Information'), edits[0].lines[0]);   // 제보 카드가 공식 상세 카드로 바뀜
+    assert.match(edits[0].buttons[0].url, /store\.steampowered\.com\/news\/app\/2246340\/view\//);
+    await run(w, 30);
+    assert.equal(edits.length, 1, '한 번만 갱신');
+    record('제보 카드 → 스팀 상세로 갱신', '사진뿐인 디시 제보 카드를 새 메시지 없이 스팀 상세 내용으로 고치고, 버튼은 스팀 공지로 바뀜', true);
+});
+
+test('19 스팀 상세가 먼저 나갔으면 뒤늦은 디시 글은 같은 버전이라 알리지 않는다', async () => {
+    const { w } = setup({ init: baseInit() });
+    await run(w, 12);
+    routes.official = officialHtml([['Ver.1.042.00.11', '', ['오류 수정'], ['Steam']], ['Ver.1.042.00.03', '', ['오류 수정'], ['Steam']]]);
+    await run(w, 10);
+    assert.equal(sent.filter(s => s.src === 'official').length, 1);
+    const OFF = 'https://info.monsterhunter.com/wilds/update/ko-kr/Ver.1.042.00.11.html';
+    routes.dcView = { '911': dcView('공식 페이지 ' + OFF + ' 입니다 확인해 보세요 감사합니다 많이 봐 주세요'), '912': dcView('<img src="a.jpg">') };
+    routes.dc = dcHtml([[912, 'Ver.1.042.00.11 패치 예정.jpg', clock.t - MIN], [911, 'Ver.1.042.00.11 패치노트', clock.t - MIN], [100, '기존 와일즈 글', T0 - 3600e3], [99, '아웃랜더스 기존 글', T0 - 7200e3]]);
+    await run(w, 10);
+    assert.equal(sent.filter(s => s.src === 'dc').length, 0);
+    assert.equal(edits.length, 0);
+    record('스팀이 먼저 나간 버전', '뒤늦은 디시 글(링크 있음·사진뿐)은 알리지 않음', true);
+});
+
+test('20 먼저 나간 카드를 고칠 수 없으면(메시지 삭제 등) 새 카드로 알린다', async () => {
+    const { w } = setup({ init: baseInit() });
+    await run(w, 12);
+    routes.dcView = { '921': dcView('<img src="a.jpg">') };
+    routes.dc = dcHtml([[921, 'Ver.1.042.00.12 패치노트.jpg', clock.t - MIN], [100, '기존 와일즈 글', T0 - 3600e3], [99, '아웃랜더스 기존 글', T0 - 7200e3]]);
+    await run(w, 6);
+    updateFail = true;
+    routes.official = officialHtml([['Ver.1.042.00.12', '', ['오류 수정'], ['Steam']], ['Ver.1.042.00.03', '', ['오류 수정'], ['Steam']]]);
+    await run(w, 10);
+    assert.equal(edits.length, 0);
+    assert.equal(sent.filter(s => s.src === 'official').length, 1, '갱신이 실패하면 새 카드로 알려야 함');
+    assert.ok(setup.logs.some(m => m.includes('카드 갱신 실패')));
+    record('카드 갱신 실패', '메시지를 고칠 수 없으면 새 카드로 알림(정보 누락 없음)', true);
 });
 
 test('17 디시 패치노트 글에 링크 없이 사진뿐이면 디시 제보로 표기하고 버튼(내용 보기)이 디시 원글로 간다', async () => {

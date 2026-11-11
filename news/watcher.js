@@ -75,7 +75,11 @@ function buildSources(env = process.env) {
                 if (!c.include) return { include: false, defer: c.defer, reason: c.reason };
                 // 영문뿐인 공지는 한글 제목으로 바꿔 올리고 본문 요약은 싣지 않는다. 그 외에는 공식 사이트 목록과 같은 종류 표시(주요 추가 요소·오류 수정·밸런스 조정)를 붙인다
                 const note = [e.dateText && `배포일 ${e.dateText}`, ...(c.englishOnly ? ['한글 본문 미제공(영문 공지)'] : e.tags)].filter(Boolean).join(' · ');
-                return { include: true, kind: c.kind, title: c.titleKo, detail: c.englishOnly ? null : e.summary, note, thumb: OFFICIAL_THUMB };
+                return {
+                    include: true, kind: c.kind, title: c.titleKo, detail: c.englishOnly ? null : e.summary, note, thumb: OFFICIAL_THUMB,
+                    // 이미 디시 기반으로 알린 버전이면 새 메시지 대신 그 카드를 상세 내용으로 고친다
+                    versions: parse.versionsOf(c.titleKo ?? e.title), versionTier: 'official', merge: true,
+                };
             },
         },
         {
@@ -99,7 +103,7 @@ function buildSources(env = process.env) {
                         return {
                             include: true, kind: c.kind, title: `업데이트 개요 (Ver.${link.version})`, sourceLabel: 'Update Information', emojiSource: 'official',
                             url: link.url, note: '디시 제보로 먼저 확인 · 공식 페이지 링크 포함',
-                            versions: [link.version], versionTier: 'official',
+                            versions: [link.version], versionTier: 'official', merge: true, mergeFrom: 'fan',
                         };
                     }
                     // 링크 없이 사진뿐이면 버튼(내용 보기)이 디시 원글로 간다
@@ -193,9 +197,10 @@ function buildPayload(source, entry, verdict, emojiIds = {}) {
 
 // ── 감시 ───────────────────────────────────────────────────────
 // deps: sources, store({ data, save() }), send(source, entry, verdict), now(), logFail(source, err), logInfo(msg) — 테스트에서 바꿔 끼운다.
-function createWatcher({ sources, store, send, now = Date.now, logFail = () => {}, logInfo = () => {} }) {
+function createWatcher({ sources, store, send, update, now = Date.now, logFail = () => {}, logInfo = () => {} }) {
     const state = store.data;
     state.recent ??= [];
+    state.cards ??= {};      // 버전별로 먼저 나간 카드(메시지 id) — 나중에 스팀 상세로 고치기 위해
     state.versions ??= [];   // 이미 알린 패치 버전(디시에서 같은 버전을 여러 사람이 올려도 한 번만 알리기 위해)
     const runtime = new Map(sources.map((s, i) => [s.id, { nextAt: now() + i * STAGGER_MS, fails: 0 }]));
 
@@ -259,16 +264,46 @@ function createWatcher({ sources, store, send, now = Date.now, logFail = () => {
                 if (!deferLogged.has(e.key)) { deferLogged.add(e.key); logInfo(`${source.label}: 한글판을 기다리는 중 — ${e.title}`); }
                 continue;
             }
+            // 스팀 한국어 공지가 이미 디시 기반으로 알린 버전이면, 새 메시지를 보내지 않고 먼저 나간 카드를 상세 내용으로 고친다(같은 정보가 두 번 나가지 않게)
+            let forceSend = false;
+            if (verdict.include && verdict.merge && verdict.versions?.length) {
+                const rec = verdict.versions.map(v => state.cards[v]).find(Boolean);
+                if (rec?.merged) {
+                    logInfo(`${source.label}: 이미 상세로 갱신한 버전이라 건너뜀 — ${e.title}`);
+                    mark(e);
+                    continue;
+                }
+                if (rec?.id && update && (verdict.mergeFrom !== 'fan' || rec.tier === 'fan')) {
+                    try {
+                        await update(source, e, verdict, rec);
+                        if (verdict.mergeFrom === 'fan') { rec.tier = 'official'; rec.url = verdict.url ?? rec.url; }   // 제보 카드가 공식 카드로 바뀜(스팀 상세는 이후에 한 번 더 반영 가능)
+                        else rec.merged = true;                                                                        // 스팀 상세 반영 완료
+                        // 카드를 고친 경우에도 '공식으로 알린 버전'으로 기록한다(이후 같은 버전의 디시 글이 새 메시지로 나가지 않게)
+                        state.versions = [...new Set([...state.versions, ...verdict.versions.map(v => `o:${v}`)])].slice(-60);
+                        store.save();
+                        logInfo(`${source.label}: 먼저 나간 카드를 ${verdict.mergeFrom === 'fan' ? '공식 카드로' : '상세 내용으로'} 갱신 — ${e.title}`);
+                        mark(e);
+                        sent++;
+                        continue;
+                    } catch (err) {
+                        forceSend = true; // 먼저 나간 메시지가 지워졌거나 고칠 수 없으면 새 카드로 알린다
+                        logInfo(`${source.label}: 카드 갱신 실패, 새 카드로 알림 — ${e.title} (${err.message})`);
+                    }
+                }
+            }
             // 같은 버전은 한 번만 알린다. 단, 사진뿐인 제보(fan)가 먼저 나갔어도 뒤에 공식 링크(official)가 확인되면 그건 다시 알린다.
             const official = verdict.versionTier === 'official';
-            if (verdict.include && verdict.versions?.length && verdict.versions.every(v => state.versions.includes(`o:${v}`) || (!official && state.versions.includes(`f:${v}`)))) {
+            if (!forceSend && verdict.include && verdict.versions?.length && verdict.versions.every(v => state.versions.includes(`o:${v}`) || (!official && state.versions.includes(`f:${v}`)))) {
                 logInfo(`${source.label}: 이미 알린 버전이라 건너뜀 — ${e.title}`);
             } else if (verdict.include && !source.noDedup && isDuplicate(source, e)) {
                 logInfo(`${source.label}: 다른 출처가 이미 올린 소식과 겹쳐 건너뜀 — ${e.title}`);
             } else if (verdict.include) {
-                await send(source, e, verdict); // 실패하면 던져서 이 글은 '알림 완료'로 기록되지 않는다
+                const messageId = await send(source, e, verdict); // 실패하면 던져서 이 글은 '알림 완료'로 기록되지 않는다
                 if (!source.noDedup) rememberSent(source, e);
                 if (verdict.versions?.length) { state.versions = [...new Set([...state.versions, ...verdict.versions.map(v => `${official ? 'o' : 'f'}:${v}`)])].slice(-60); }
+                for (const v of verdict.versions ?? []) state.cards[v] = { id: messageId ?? null, url: verdict.url ?? null, tier: official ? 'official' : 'fan', merged: verdict.mergeFrom !== 'fan' && !!verdict.merge };
+                const cardKeys = Object.keys(state.cards);
+                for (const k of cardKeys.slice(0, Math.max(0, cardKeys.length - 30))) delete state.cards[k];
                 sent++;
             }
             mark(e);
@@ -319,11 +354,20 @@ function startNewsWatcher(client, store) {
         if (Object.keys(emojiIds).length < Object.keys(EMOJI_NAMES).length && Date.now() - emojiTriedAt > 10 * 60_000) await refreshEmojis();
         const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
         if (!channel?.isTextBased()) throw new Error(`소식 채널을 찾을 수 없음(${NEWS_CHANNEL_ID})`);
-        await channel.send(buildPayload(source, entry, verdict, emojiIds));
+        const message = await channel.send(buildPayload(source, entry, verdict, emojiIds));
         console.log(`[소식] ${source.label} — ${entry.title}`);
+        return message.id;
+    };
+    // 먼저 나간 카드를 스팀 상세 내용으로 고친다(버튼 주소는 먼저 나간 카드의 공식 링크가 있으면 그대로 유지)
+    const update = async (source, entry, verdict, rec) => {
+        const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
+        if (!channel?.isTextBased()) throw new Error(`소식 채널을 찾을 수 없음(${NEWS_CHANNEL_ID})`);
+        const message = await channel.messages.fetch(rec.id);
+        await message.edit(buildPayload(source, entry, { ...verdict, url: rec.url ?? verdict.url }, emojiIds));
+        console.log(`[소식] ${source.label} — 카드 갱신: ${entry.title}`);
     };
     const watcher = createWatcher({
-        sources, store, send,
+        sources, store, send, update,
         logFail: (source, err) => {
             const t = Date.now();
             if (t - (lastLog.get(source.id) ?? 0) < 60 * 60_000) return;
