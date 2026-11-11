@@ -5,9 +5,7 @@ const path = require('path');
 
 const token = process.env.DISCORD_TOKEN;
 const { Agent, request } = require('undici');
-const quest = require('./raid/quest');
-const { openEquipment, handleEquipmentSelect } = require('./raid/equipment');
-const { flushAll, createStore } = require('./raid/store');
+const { flushAll, createStore } = require('./store');
 const { startNewsWatcher } = require('./news/watcher');
 const { decideAccess, canToggleLock } = require('./card-lock');
 
@@ -15,8 +13,7 @@ const { decideAccess, canToggleLock } = require('./card-lock');
 // 다음 버튼 클릭 때 TLS 연결을 새로 맺느라 느려진다 (이 서버 CPU에서 새 연결 하나에 약 0.3초).
 const restAgent = new Agent({ connect: { timeout: 30000 }, keepAliveTimeout: 60000, keepAliveMaxTimeout: 600000 });
 const client = new Client({
-    // GuildMessages: 퀘스트 메시지가 채팅에 묻혔는지 알기 위해(메시지 내용은 읽지 않음)
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
+    intents: [GatewayIntentBits.Guilds],
     // 프로필에 "Monster Hunter Wilds 하는 중" 표시 (옵션에 두면 재접속할 때도 자동으로 다시 보낸다)
     presence: { status: 'online', activities: [{ name: 'Monster Hunter Wilds', type: ActivityType.Playing }] },
     rest: { agent: restAgent }
@@ -36,8 +33,9 @@ function warmConnection() {
 setInterval(warmConnection, WARM_INTERVAL_MS).unref();
 warmConnection();
 
-// /퀘스트·/장비(레이드)를 쓸 수 있는 서버. 다른 서버(본서버 1187373626966671422 포함)에서는 "준비 중" 안내만 보인다.
-const RAID_GUILDS = new Set(['1282694117255548960']); // 테스트 서버
+// 폐기한 레이드 명령어(/퀘스트·/장비)가 등록돼 있던 서버. 시작할 때 이 서버의 서버 전용 명령어를 비워 목록에서 지운다.
+// (모두 지워진 걸 확인한 뒤에는 이 상수와 아래 정리 코드를 함께 없애도 된다)
+const LEGACY_COMMAND_GUILDS = ['1282694117255548960']; // 테스트 서버
 
 // 응답이 느릴 때 원인을 볼 수 있도록 기록하는 기준 (디스코드 응답 제한은 3초)
 const SLOW_RESPONSE_MS = 1500;
@@ -232,7 +230,7 @@ function saveState() {
 for (const sig of ['SIGTERM', 'SIGINT']) {
     process.once(sig, () => {
         if (saveTimer) { clearTimeout(saveTimer); writeStateNow(); }
-        flushAll(); // 헌터 정보·진행 중 퀘스트
+        flushAll(); // 소식 감지 기록 등 저장소에 남은 변경
         process.exit(0);
     });
 }
@@ -451,24 +449,17 @@ client.once(Events.ClientReady, async c => {
     console.log(`✅ 봇 로그인 완료: ${c.user.tag}`);
     const rest = new REST({ version: '10' }).setToken(token);
     try {
-        // 모든 서버에는 /몬스터 만 보이고, 개발 중인 /퀘스트·/장비 는 테스트 서버에만 등록한다 (다른 서버의 명령어 목록에서 숨김)
         await rest.put(Routes.applicationCommands(c.user.id), {
             body: [{ name: '몬스터', description: '몬스터 목록을 열고 정보를 확인합니다.' }]
         });
-        for (const guildId of RAID_GUILDS) {
-            await rest.put(Routes.applicationGuildCommands(c.user.id, guildId), {
-                body: [
-                    { name: '퀘스트', description: '몬스터 토벌 퀘스트를 열고 파티를 모집합니다.', contexts: [0] },
-                    { name: '장비', description: '내 무기·속성·방어구와 소재함을 확인하고 바꿉니다.' },
-                ]
-            }).catch(e => console.error(`[테스트 서버 명령어 등록 실패] ${guildId}:`, e.code || '', e.message));
+        // 폐기한 레이드 명령어를 서버 전용 목록에서 지운다
+        for (const guildId of LEGACY_COMMAND_GUILDS) {
+            await rest.put(Routes.applicationGuildCommands(c.user.id, guildId), { body: [] })
+                .catch(e => console.error(`[옛 명령어 정리 실패] ${guildId}:`, e.code || '', e.message));
         }
     } catch (e) { console.error(e); }
-    quest.init(c); // 재시작 전에 진행 중이던 퀘스트 이어가기
     startNewsWatcher(c, createStore('news', {})); // 와일즈 소식(공식 패치노트·캡콤아시아 유튜브·디시 제보) 자동 공지
 });
-
-client.on(Events.MessageCreate, message => quest.noteChannelMessage(message));
 
 // 응답 하나가 실패해도(예: 3초 초과로 Unknown interaction) 봇 전체가 꺼지지 않도록 여기서 잡는다
 client.on(Events.InteractionCreate, async interaction => {
@@ -530,16 +521,6 @@ async function handleInteraction(interaction) {
         if (isCooldownActive(interaction)) return;
         return openPrivateList(interaction, 0, 'auto');
     }
-    // 레이드(퀘스트)·장비 — 버튼 ID가 "q:" / "eq:" 로 시작. 개발 중이라 테스트 서버에서만 동작
-    const isRaidInteraction = (interaction.isChatInputCommand() && ['퀘스트', '장비'].includes(interaction.commandName))
-        || ((interaction.isButton() || interaction.isStringSelectMenu()) && /^(q|eq):/.test(interaction.customId));
-    if (isRaidInteraction && !RAID_GUILDS.has(interaction.guildId)) return interaction.reply(buildNoticeMessage('해당 기능은 준비 중입니다.'));
-    if (interaction.isChatInputCommand() && interaction.commandName === '퀘스트') return quest.openQuestBoard(interaction);
-    if (interaction.isChatInputCommand() && interaction.commandName === '장비') return openEquipment(interaction);
-    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('eq:')) return handleEquipmentSelect(interaction, quest.isLockedForEquip);
-    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('q:')) return quest.handleQuestSelect(interaction);
-    if (interaction.isButton() && interaction.customId.startsWith('q:')) return quest.handleQuestButton(interaction);
-
     if (interaction.isButton()) {
         const parts = interaction.customId.split('_');
         const action = parts[0];
