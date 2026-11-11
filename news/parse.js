@@ -120,7 +120,9 @@ function versionsOf(text) {
 // 어센던스(Ascendance)는 와일즈의 확장팩이라 와일즈 소식으로 본다
 const WILDS_RE = /와일즈|wilds|MHWs|어센던스|ascendance/i;
 // 제목에 '와일즈'가 없어도 와일즈 소식으로 보는 말: 와일즈 고유 콘텐츠(격투장·프리 챌린지·몽화의식·축제), 그리고 와일즈 몬스터 이름 + 챌린지·격투장·퀘스트
-const WILDS_HINT_RE = /격투장|프리\s*챌린지|몽화\s*의\s*식|몽화의식|축제|페스티벌|festival/i;
+// 교류 축제 공식 이름: 교류 축제[화무 의식] · [용화 의식] · [몽화 의식] · [축요 의식] (유저는 띄어쓰기·꺾쇠 없이 줄여 쓰기도 한다)
+const FESTIVAL_RE = /교류\s*축제|(?:화무|용화|몽화|축요)\s*의\s*식|축제|페스티벌|festival/i;
+const WILDS_HINT_RE = new RegExp(String.raw`격투장|프리\s*챌린지|${FESTIVAL_RE.source}`, 'i');
 const WILDS_MONSTER_NAMES = (() => {
     try { return require('fs').readdirSync(require('path').join(__dirname, '..', 'monsters')).filter(f => f.endsWith('.json')).map(f => f.slice(0, -5)).filter(n => n.length >= 3 && !/훈련/.test(n)); } catch { return []; }
 })();
@@ -134,7 +136,7 @@ const KINDS = [
     { id: 'maintenance', label: '점검 예고', re: /점검/ },
     { id: 'patch',       label: '패치·업데이트', re: /패치|업데이트|\bTU\b|(?<![가-힣])버전|Ver\.?\s*\d/i },
     { id: 'eventquest',  label: '이벤트 퀘스트', re: /이벤트\s*퀘|배포\s*퀘|챌린지|격투장/ },
-    { id: 'festival',    label: '축제 예고', re: /축제|페스티벌|몽화\s*의?\s*식|festival/i },
+    { id: 'festival',    label: '축제 예고', re: FESTIVAL_RE },
     { id: 'content',     label: '신규 콘텐츠', re: /신규|신\s*몬스터|DLC|추가\s*몬스터|체험판|공개/i },
     { id: 'broadcast',   label: '방송·행사 일정', re: /방송|생방|라이브|프렌즈|발표|일정/ },
     { id: 'goods',       label: '판매량·굿즈', re: /판매량|굿즈|인형|피규어|콜라보|실적|\d+\s*만\s*장/ },
