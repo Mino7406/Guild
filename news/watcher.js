@@ -46,7 +46,14 @@ async function fetchText(url, headers = {}) {
         redirect: 'follow',
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-    if (!res.ok) { const err = new Error(`HTTP ${res.status}`); err.status = res.status; throw err; }
+    if (!res.ok) {
+        // 원인을 로그에서 볼 수 있게 JSON 오류 사유(예: 구글 API의 "API key not valid")를 짧게 덧붙인다. 키 값은 응답에 들어 있지 않다.
+        let detail = '';
+        try { detail = String(JSON.parse((await res.text()).slice(0, 4000))?.error?.message ?? '').replace(/\s+/g, ' ').slice(0, 120); } catch { /* JSON 이 아니면 사유 없음 */ }
+        const err = new Error(detail ? `HTTP ${res.status} (${detail})` : `HTTP ${res.status}`);
+        err.status = res.status;
+        throw err;
+    }
     if (Number(res.headers.get('content-length')) > MAX_BODY_CHARS) throw new Error('응답이 너무 큼');
     const text = await res.text();
     if (text.length > MAX_BODY_CHARS) throw new Error('응답이 너무 큼');

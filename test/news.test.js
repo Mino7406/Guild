@@ -85,6 +85,17 @@ test('유튜브 키에 공백·줄바꿈·따옴표가 섞여도 정리해서 �
     } finally { global.fetch = realFetch; }
 });
 
+test('요청이 실패하면 오류 사유를 짧게 덧붙이고, JSON 이 아니면 상태 코드만 남긴다', async () => {
+    const realFetch = global.fetch;
+    try {
+        const yt = buildSources({ YOUTUBE_API_KEY: 'AbC123' }).find(s => s.id === 'youtube');
+        global.fetch = async () => new Response(JSON.stringify({ error: { code: 400, message: 'API key not valid. Please pass a valid API key.' } }), { status: 400 });
+        await assert.rejects(yt.load(), /HTTP 400 \(API key not valid/);
+        global.fetch = async () => new Response('<html>Forbidden</html>', { status: 403 });
+        await assert.rejects(buildSources({}).find(s => s.id === 'official').load(), err => err.message === 'HTTP 403' && err.status === 403);
+    } finally { global.fetch = realFetch; }
+});
+
 test('출처별 이모지·썸네일 매칭', () => {
     const sources = Object.fromEntries(buildSources({ YOUTUBE_API_KEY: 'k' }).map(s => [s.id, s]));
     // 이모지 이름과 PNG 파일이 서로 맞는다
