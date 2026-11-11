@@ -33,8 +33,9 @@ const MAX_BODY_CHARS = 3_000_000;
 const MAX_SEEN = 300;
 const RECENT_KEEP = 300;                         // 보낸 제목 기억(한 건에 수십 바이트라 부담 없음)
 const RECENT_WINDOW_MS = 14 * 24 * 60 * 60_000;  // 출처가 달라도 2주 안에 같은 소식이 다시 올라오면 올리지 않는다(다음날·며칠 뒤 재탕 방지)
-const ACCENT = 0xd9822b;
-const OFFICIAL_THUMB = 'https://info.monsterhunter.com/wilds/update/assets/images/share.png';
+const ACCENT = 0xd9822b;   // 공식(스팀 공지)
+// 출처별 띠 색: 디시(디시인사이드 파랑)·유튜브(빨강)·깃허브(짙은 회색)
+const ACCENTS = { official: ACCENT, dc: 0x3b4890, youtube: 0xff0000, reframework: 0x24292f };
 
 class EmptyListError extends Error {}
 
@@ -76,7 +77,7 @@ function buildSources(env = process.env) {
                 // 영문뿐인 공지는 한글 제목으로 바꿔 올리고 본문 요약은 싣지 않는다. 그 외에는 공식 사이트 목록과 같은 종류 표시(주요 추가 요소·오류 수정·밸런스 조정)를 붙인다
                 const note = [e.dateText && `배포일 ${e.dateText}`, ...(c.englishOnly ? ['한글 본문 미제공(영문 공지)'] : e.tags)].filter(Boolean).join(' · ');
                 return {
-                    include: true, kind: c.kind, title: c.titleKo, detail: c.englishOnly ? null : e.summary, note, thumb: OFFICIAL_THUMB,
+                    include: true, kind: c.kind, title: c.titleKo, detail: c.englishOnly ? null : e.summary, note,
                     // 이미 디시 기반으로 알린 버전이면 새 메시지 대신 그 카드를 상세 내용으로 고친다
                     versions: parse.versionsOf(c.titleKo ?? e.title), versionTier: 'official', merge: true, englishOnly: !!c.englishOnly,
                 };
@@ -177,7 +178,7 @@ function buildPayload(source, entry, verdict, emojiIds = {}) {
     const parts = thumbUrl && texts.length > 3 ? [texts[0], texts[1], texts.slice(2).join('\n')] : texts;
     const lines = parts.map(t => new TextDisplayBuilder().setContent(t));
 
-    const container = new ContainerBuilder().setAccentColor(ACCENT);
+    const container = new ContainerBuilder().setAccentColor(ACCENTS[verdict.emojiSource ?? source.id] ?? ACCENT);
     if (thumbUrl) {
         const thumb = new ThumbnailBuilder().setURL(thumbUrl).setDescription(sourceLabel.slice(0, 100));
         container.addSectionComponents(new SectionBuilder().addTextDisplayComponents(...lines).setThumbnailAccessory(thumb));
