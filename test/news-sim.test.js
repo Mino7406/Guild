@@ -343,15 +343,14 @@ test('16 디시 패치노트 글에 공식 페이지 링크가 있으면 공식�
     assert.equal(d[0].heading, '### 업데이트 개요 (Ver.1.042.00.05)');
     assert.ok(d[0].lines[0].includes('Update Information'), d[0].lines[0]);
     assert.ok(d[0].lines.join(' ').includes('디시 제보로 먼저 확인'));
-    assert.deepEqual(d[0].buttons.map(b => b.label), ['공식 패치노트 보기', '디시 원글']);
-    assert.equal(d[0].buttons[0].url, OFF);
-    assert.match(d[0].buttons[1].url, /gall.dcinside.com.*no=601/);
+    assert.deepEqual(d[0].buttons.map(b => b.label), ['내용 보기']);   // 버튼은 하나, 이름은 '내용 보기'
+    assert.equal(d[0].buttons[0].url, OFF);                           // 공식 페이지로 간다
     assert.ok(setup.logs.some(m => m.includes('이미 알린 버전')));
     // 뒤늦게 스팀 한국어 공지가 올라오면 자세한 내용으로 이어서 알린다
     routes.official = officialHtml([['Ver.1.042.00.05', '', ['오류 수정'], ['Steam']], ['Ver.1.042.00.03', '', ['오류 수정'], ['Steam']]]);
     await run(w, 10);
     assert.equal(sent.filter(s => s.src === 'official').length, 1);
-    record('디시 패치노트(공식 링크 있음)', '공식으로 표기, 버튼=공식 페이지·디시 원글, 같은 버전 중복 글은 건너뜀, 뒤이어 스팀 상세 공지', true);
+    record('디시 패치노트(공식 링크 있음)', '공식으로 표기, 버튼(내용 보기)=공식 페이지, 같은 버전 중복 글은 건너뜀, 뒤이어 스팀 상세 공지', true);
 });
 
 test('16b 사진뿐인 제보가 먼저 나가도, 같은 버전의 공식 링크 글이 뒤에 올라오면 공식 카드로 다시 알린다', async () => {
@@ -372,7 +371,7 @@ test('16b 사진뿐인 제보가 먼저 나가도, 같은 버전의 공식 링�
     record('제보 → 공식 링크 확인', '사진뿐인 제보가 먼저 나가고, 공식 링크 글이 뒤에 오면 공식 카드로 한 번 더 알림', true);
 });
 
-test('17 디시 패치노트 글에 링크 없이 사진뿐이면 디시 제보로 표기하고 버튼을 디시 원글로 건다', async () => {
+test('17 디시 패치노트 글에 링크 없이 사진뿐이면 디시 제보로 표기하고 버튼(내용 보기)이 디시 원글로 간다', async () => {
     const { w } = setup({ init: baseInit() });
     await run(w, 12);
     routes.dcView = { '701': dcView('<img src="a.jpg">') };
@@ -381,7 +380,7 @@ test('17 디시 패치노트 글에 링크 없이 사진뿐이면 디시 제보�
     const d = sent.filter(s => s.src === 'dc');
     assert.equal(d.length, 1);
     assert.ok(d[0].lines[0].includes('몬스터헌터 시리즈 갤러리 ⓜ'), d[0].lines[0]);
-    assert.deepEqual(d[0].buttons.map(b => b.label), ['디시 원글 보기']);
+    assert.deepEqual(d[0].buttons.map(b => b.label), ['내용 보기']);
     assert.match(d[0].buttons[0].url, /gall.dcinside.com.*no=701/);
-    record('디시 패치노트(사진뿐)', '디시 제보로 표기, 버튼=디시 원글', true);
+    record('디시 패치노트(사진뿐)', '디시 제보로 표기, 버튼(내용 보기)=디시 원글', true);
 });

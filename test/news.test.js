@@ -107,6 +107,20 @@ test('요청이 실패하면 오류 사유를 짧게 덧붙이고, JSON 이 아�
     } finally { global.fetch = realFetch; }
 });
 
+test('모든 카드의 버튼은 하나이고 이름은 "내용 보기"로 통일(디시 원글 버튼 없음)', () => {
+    const sources = Object.fromEntries(buildSources({ YOUTUBE_API_KEY: 'k' }).map(s => [s.id, s]));
+    const walkButtons = payload => { const out = []; (function walk(x) { if (!x || typeof x !== 'object') return; if (x.url && x.label) out.push(x); Object.values(x).forEach(walk); })(payload.components[0].toJSON()); return out; };
+    const entry = { title: '제목', url: 'https://example.com/x', at: 1, tags: [], summary: '' };
+    for (const id of ['official', 'dc', 'reframework']) {
+        const b = walkButtons(buildPayload(sources[id], entry, { include: true, kind: { label: 'k', emoji: 'E' } }, { [id]: '1' }));
+        assert.deepEqual(b.map(x => x.label), ['내용 보기'], id);
+        assert.equal(b[0].url, 'https://example.com/x');
+    }
+    // 판정이 주소를 바꾼 경우(디시 글의 공식 링크)에도 버튼은 하나
+    const b = walkButtons(buildPayload(sources.dc, entry, { include: true, kind: { label: 'k', emoji: 'E' }, url: 'https://info.monsterhunter.com/wilds/update/ko-kr/Ver.1.042.00.05.html', sourceLabel: 'Update Information', emojiSource: 'official' }, { official: '1' }));
+    assert.deepEqual(b.map(x => [x.label, x.url]), [['내용 보기', 'https://info.monsterhunter.com/wilds/update/ko-kr/Ver.1.042.00.05.html']]);
+});
+
 test('출처별 이모지·썸네일 매칭', () => {
     const sources = Object.fromEntries(buildSources({ YOUTUBE_API_KEY: 'k' }).map(s => [s.id, s]));
     // 이모지 이름과 PNG 파일이 서로 맞는다

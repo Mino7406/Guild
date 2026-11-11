@@ -75,7 +75,7 @@ function buildSources(env = process.env) {
                 if (!c.include) return { include: false, defer: c.defer, reason: c.reason };
                 // 영문뿐인 공지는 한글 제목으로 바꿔 올리고 본문 요약은 싣지 않는다. 그 외에는 공식 사이트 목록과 같은 종류 표시(주요 추가 요소·오류 수정·밸런스 조정)를 붙인다
                 const note = [e.dateText && `배포일 ${e.dateText}`, ...(c.englishOnly ? ['한글 본문 미제공(영문 공지)'] : e.tags)].filter(Boolean).join(' · ');
-                return { include: true, kind: c.kind, title: c.titleKo, detail: c.englishOnly ? null : e.summary, note, thumb: OFFICIAL_THUMB, button: '내용 보기' };
+                return { include: true, kind: c.kind, title: c.titleKo, detail: c.englishOnly ? null : e.summary, note, thumb: OFFICIAL_THUMB };
             },
         },
         {
@@ -98,14 +98,14 @@ function buildSources(env = process.env) {
                     if (link) {
                         return {
                             include: true, kind: c.kind, title: `업데이트 개요 (Ver.${link.version})`, sourceLabel: 'Update Information', emojiSource: 'official',
-                            url: link.url, note: '디시 제보로 먼저 확인 · 공식 페이지 링크 포함', button: '공식 패치노트 보기',
-                            extraButtons: [{ label: '디시 원글', url: e.url }], versions: [link.version], versionTier: 'official',
+                            url: link.url, note: '디시 제보로 먼저 확인 · 공식 페이지 링크 포함',
+                            versions: [link.version], versionTier: 'official',
                         };
                     }
-                    // 링크 없이 사진뿐이면 버튼을 디시 원글로 건다
-                    return { include: true, kind: c.kind, button: '디시 원글 보기', versions: parse.versionsOf(e.title), versionTier: 'fan' };
+                    // 링크 없이 사진뿐이면 버튼(내용 보기)이 디시 원글로 간다
+                    return { include: true, kind: c.kind, versions: parse.versionsOf(e.title), versionTier: 'fan' };
                 }
-                return { include: true, kind: c.kind, button: '디시 원글 보기' };
+                return { include: true, kind: c.kind };
             },
         },
     ];
@@ -118,7 +118,7 @@ function buildSources(env = process.env) {
             include: true,
             kind: { id: 'release', label: '새 릴리즈', emoji: '🧩' },
             note: [e.tag && e.tag !== e.title ? e.tag : null, e.prerelease ? '프리릴리즈' : null].filter(Boolean).join(' · '),
-            detail: e.summary, button: '릴리즈 보기',
+            detail: e.summary,
         }),
     });
     // 붙여 넣을 때 딸려 온 줄바꿈·공백·따옴표가 키에 섞여도 동작하도록 키에 쓸 수 없는 글자는 뺀다(유튜브 API 키는 영문·숫자·_·- 만 쓴다)
@@ -151,6 +151,7 @@ function dayText(at) {
 
 // 출처별 봇 전용(애플리케이션) 이모지 — deploy/register-emojis.js 가 등록한 이름. 썸네일과 유튜브 머리말에 쓴다.
 const EMOJI_NAMES = { official: 'news_wilds', dc: 'news_dcinside', youtube: 'news_youtube', reframework: 'news_github' };
+const BUTTON_LABEL = '내용 보기';
 const emojiThumb = id => `https://cdn.discordapp.com/emojis/${id}.png?size=128`;
 
 // emojiIds: { 출처id: 이모지ID } — 아직 등록 전이면 비어 있고, 그러면 예전 방식(기본 이모지·공식 이미지)으로 보낸다.
@@ -185,8 +186,7 @@ function buildPayload(source, entry, verdict, emojiIds = {}) {
         container.addTextDisplayComponents(...lines);
     }
     container.addActionRowComponents(new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(verdict.button ?? '내용 보기').setURL(url),
-        ...(verdict.extraButtons ?? []).slice(0, 4).map(b => new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(b.label).setURL(b.url)),
+        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(BUTTON_LABEL).setURL(url),   // 모든 카드의 버튼 이름은 '내용 보기'로 통일
     ));
     return { components: [container], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
 }
