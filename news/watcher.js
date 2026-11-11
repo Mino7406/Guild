@@ -110,6 +110,7 @@ function buildSources(env = process.env) {
         },
         {
             id: 'dc', pollMs: 2 * 60_000, maxFresh: 10, maxAgeMs: 36 * 60 * 60_000, label: '몬스터헌터 시리즈 갤러리 ⓜ',
+            statusLabel: '몬스터헌터 시리즈 갤러리 ⓜ · 공식 말머리',
             load: async () => parse.parseDcList(await fetchText(DC_LIST)),
             decide: async (e, io = {}) => {
                 const getHtml = io.fetchText ?? fetchText;   // 테스트 미리보기에서는 가짜 본문을 넣어 같은 코드를 통과시킨다
@@ -145,7 +146,7 @@ function buildSources(env = process.env) {
     // 처음 켤 때 최근 12시간 안의 글은 '이미 본 글'로 치지 않고 규칙에 따라 판단한다(이번에 놓친 글을 알리기 위해).
     const dcSource = sources.find(x => x.id === 'dc');
     sources.splice(sources.indexOf(dcSource) + 1, 0, {
-        ...dcSource, id: 'dcbest', pollMs: 5 * 60_000, maxFresh: 5, seedAnnounceMs: 12 * 60 * 60_000,
+        ...dcSource, id: 'dcbest', statusLabel: '몬스터헌터 시리즈 갤러리 ⓜ · 개념글', pollMs: 5 * 60_000, maxFresh: 5, seedAnnounceMs: 12 * 60 * 60_000,
         load: async () => parse.parseDcList(await fetchText(DC_BEST_LIST)),
         decide: async (e, io) => {
             const v = await dcSource.decide(e, io);
@@ -449,7 +450,7 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
     function status() {
         return {
             today: state.stats.days[dayKey()] ?? 0,
-            sources: sources.map(src => ({ id: src.id, label: src.label, ...state.stats.sources[src.id] })),
+            sources: sources.map(src => ({ id: src.id, label: src.statusLabel ?? src.label, ...state.stats.sources[src.id] })),
         };
     }
     // 잘못 올라온 소식 정리용: 최근 목록과, 지운 뒤 기록에서 빼기
