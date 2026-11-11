@@ -1,7 +1,7 @@
 // 몬스터 헌터 와일즈(어센던스 포함) 소식을 지켜보다가 새 소식이 올라오면 #와일즈_소식 채널에 카드로 올린다.
 //
 // 출처 세 곳
-//  - official : 공식 패치노트·점검 공지(스팀 공개 뉴스 API의 캡콤 공지; 공식 사이트는 서버 접속을 막아 쓰지 않음) — 10분마다
+//  - official : 공식 패치노트·점검 공지(스팀 공개 공지 목록의 캡콤 한국어 공지; 공식 사이트는 서버 접속을 막아 쓰지 않음) — 10분마다
 //  - reframework : REFramework-nightly GitHub 새 릴리즈 — 5분마다
 //  - youtube  : 캡콤아시아 업로드 목록 (YouTube Data API, 키는 .env 의 YOUTUBE_API_KEY) — 5분마다
 //  - dc       : 디시 몬갤 "공식" 말머리 글 중 와일즈 소식 — 5분마다 (제목으로 분류, 행사 글은 본문에서 와일즈 참여 확인)
@@ -25,7 +25,7 @@ const parse = require('./parse');
 
 const NEWS_CHANNEL_ID = '1241760636573323295'; // 몬스터헌터 와일즈 서버 #와일즈_소식
 
-const TICK_MS = 60_000;
+const TICK_MS = 30_000;   // 어느 출처가 확인할 차례인지 보는 주기(비교만 해서 거의 공짜). 알림이 최대 이만큼만 늦도록 짧게 둔다
 const STAGGER_MS = 20_000;
 const MAX_BACKOFF = 6;
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -67,18 +67,18 @@ const DC_LIST = 'https://gall.dcinside.com/mgallery/board/lists/?id=capcommh&sor
 function buildSources(env = process.env) {
     const sources = [
         {
-            // 공식 업데이트 사이트(info.monsterhunter.com)는 서버 접속을 403으로 막아서, 같은 공지를 스팀 공개 뉴스 API 로 받는다.
-            id: 'official', pollMs: 10 * 60_000, maxFresh: 3, noDedup: true, maxAgeMs: 7 * 24 * 60 * 60_000, label: 'Update Information',
-            load: async () => parse.parseSteamNews(await fetchText(parse.STEAM_NEWS_API)),
+            // 공식 업데이트 사이트(info.monsterhunter.com)는 서버 접속을 403으로 막아서, 같은 공지를 스팀 공개 공지 목록(한국어)으로 받는다.
+            id: 'official', pollMs: 3 * 60_000, maxFresh: 3, noDedup: true, maxAgeMs: 7 * 24 * 60 * 60_000, label: 'Update Information',
+            load: async () => parse.parseSteamEvents(await fetchText(parse.STEAM_EVENTS_API)),
             decide: e => {
                 const c = parse.classifySteam(e.title);
                 return c.include
-                    ? { include: true, kind: c.kind, detail: e.summary, thumb: OFFICIAL_THUMB, button: '내용 보기' }
-                    : { include: false, reason: c.reason };
+                    ? { include: true, kind: c.kind, detail: e.summary, note: e.dateText ? `배포일 ${e.dateText}` : null, thumb: OFFICIAL_THUMB, button: '내용 보기' }
+                    : { include: false, defer: c.defer, reason: c.reason };
             },
         },
         {
-            id: 'dc', pollMs: 5 * 60_000, maxFresh: 10, maxAgeMs: 36 * 60 * 60_000, label: '몬스터헌터 시리즈 갤러리 ⓜ',
+            id: 'dc', pollMs: 2 * 60_000, maxFresh: 10, maxAgeMs: 36 * 60 * 60_000, label: '몬스터헌터 시리즈 갤러리 ⓜ',
             load: async () => parse.parseDcList(await fetchText(DC_LIST)),
             decide: async e => {
                 const c = parse.classifyTitle(e.title);
@@ -94,7 +94,7 @@ function buildSources(env = process.env) {
     // REFramework 새 릴리즈: 와일즈 모드 도구라 새 빌드가 나오면 바로 알린다. 다른 출처와 겹칠 일이 없어 중복 검사는 하지 않는다.
     // (GitHub 무인증 한도는 시간당 60회 — 5분마다 확인하면 12회)
     sources.push({
-        id: 'reframework', pollMs: 5 * 60_000, maxFresh: 5, noDedup: true, maxAgeMs: 3 * 24 * 60 * 60_000, label: 'REFramework (GitHub)',
+        id: 'reframework', pollMs: 3 * 60_000, maxFresh: 5, noDedup: true, maxAgeMs: 3 * 24 * 60 * 60_000, label: 'REFramework (GitHub)',
         load: async () => parse.parseGithubReleases(await fetchText(parse.REFRAMEWORK_API, { Accept: 'application/vnd.github+json' })),
         decide: e => ({
             include: true,
@@ -107,7 +107,7 @@ function buildSources(env = process.env) {
     const ytKey = String(env.YOUTUBE_API_KEY ?? '').replace(/[^A-Za-z0-9_-]/g, '');
     if (ytKey) {
         sources.push({
-            id: 'youtube', pollMs: 5 * 60_000, maxFresh: 5, maxAgeMs: 3 * 24 * 60 * 60_000, label: '캡콤아시아 유튜브',
+            id: 'youtube', pollMs: 3 * 60_000, maxFresh: 5, maxAgeMs: 3 * 24 * 60 * 60_000, label: '캡콤아시아 유튜브',
             load: async () => parse.parseYoutubePlaylist(await fetchText(
                 `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=10&playlistId=${parse.YT_UPLOADS_PLAYLIST}`,
                 { 'x-goog-api-key': ytKey }, // 키는 주소가 아니라 헤더로 보낸다(오류 로그에 안 남도록)
@@ -146,16 +146,17 @@ function buildPayload(source, entry, verdict, emojiIds = {}) {
         return { content: `-# ${icon} ${kind.label} · ${source.label}\n${entry.url}`, allowedMentions: { parse: [] } };
     }
     const title = entry.title.length > 200 ? `${entry.title.slice(0, 199)}…` : entry.title;
-    const lines = [
-        new TextDisplayBuilder().setContent(`-# ${kind.emoji} ${kind.label} · ${source.label}`),
-        new TextDisplayBuilder().setContent(`### ${title}`),
-    ];
+    const texts = [`-# ${kind.emoji} ${kind.label} · ${source.label}`, `### ${title}`];
     const sub = [source.id === 'official' ? null : dayText(entry.at), verdict.note].filter(Boolean).join(' · ');
-    if (verdict.detail) lines.push(new TextDisplayBuilder().setContent(verdict.detail.slice(0, 300)));
-    if (sub) lines.push(new TextDisplayBuilder().setContent(`-# ${sub}`));
+    if (verdict.detail) texts.push(verdict.detail.slice(0, 300));
+    if (sub) texts.push(`-# ${sub}`);
+
+    const thumbUrl = emojiId ? emojiThumb(emojiId) : verdict.thumb;
+    // 썸네일이 붙는 섹션은 텍스트를 3개까지만 넣을 수 있다(디스코드 규칙). 넘치면 제목 아래 줄들을 하나로 합친다.
+    const parts = thumbUrl && texts.length > 3 ? [texts[0], texts[1], texts.slice(2).join('\n')] : texts;
+    const lines = parts.map(t => new TextDisplayBuilder().setContent(t));
 
     const container = new ContainerBuilder().setAccentColor(ACCENT);
-    const thumbUrl = emojiId ? emojiThumb(emojiId) : verdict.thumb;
     if (thumbUrl) {
         const thumb = new ThumbnailBuilder().setURL(thumbUrl).setDescription(source.label.slice(0, 100));
         container.addSectionComponents(new SectionBuilder().addTextDisplayComponents(...lines).setThumbnailAccessory(thumb));
@@ -188,6 +189,7 @@ function createWatcher({ sources, store, send, now = Date.now, logFail = () => {
     }
     // 글 하나의 분류(decide)가 계속 실패하면(예: 지워진 글의 본문 요청이 404) 뒤의 새 글까지 막히므로 3번 실패하면 포기하고 넘어간다.
     const decideFails = new Map();
+    const deferLogged = new Set();
     const MAX_DECIDE_FAILS = 3;
 
     // 출처 하나를 한 번 확인한다. 올린 개수를 돌려준다(처음 기억만 한 경우 0).
@@ -227,6 +229,11 @@ function createWatcher({ sources, store, send, now = Date.now, logFail = () => {
                 if (n < MAX_DECIDE_FAILS) throw err; // 다음 확인 때 다시 시도
                 logInfo(`${source.label}: 분류가 ${n}번 실패해 건너뜀 — ${e.title} (${err.message})`);
                 mark(e);
+                continue;
+            }
+            if (verdict.defer) {
+                // 한글 번역이 아직 없는 공지: '본 것'으로 기록하지 않고 다음 확인 때 다시 본다(오래되면 위의 나이 검사에서 포기)
+                if (!deferLogged.has(e.key)) { deferLogged.add(e.key); logInfo(`${source.label}: 한글판을 기다리는 중 — ${e.title}`); }
                 continue;
             }
             if (verdict.include && !source.noDedup && isDuplicate(source, e)) {

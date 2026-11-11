@@ -36,7 +36,7 @@ function setup({ youtube = true, init = {} } = {}) {
     Object.assign(routes, init);
     global.fetch = async (url) => {
         url = String(url);
-        const key = url.includes('api.steampowered.com') ? 'official'
+        const key = url.includes('store.steampowered.com') ? 'official'
             : url.includes('gall.dcinside.com') && url.includes('/view/') ? 'dcView'
             : url.includes('gall.dcinside.com') ? 'dc'
             : url.includes('googleapis.com') ? 'yt'
@@ -54,7 +54,8 @@ function setup({ youtube = true, init = {} } = {}) {
         sources, store, now: () => clock.t,
         send: async (source, entry, verdict) => {
             if (sendFail > 0) { sendFail--; throw new Error('Missing Permissions'); }
-            const payload = buildPayload(source, entry, verdict);
+            // 운영과 같은 조건: 봇 이모지가 등록돼 있어 모든 카드에 썸네일이 붙는다
+            const payload = buildPayload(source, entry, verdict, { official: '1', dc: '2', youtube: '3', reframework: '4' });
             // 유튜브는 일반 메시지(링크 임베드), 나머지는 카드(컴포넌트 v2)
             const lines = payload.content !== undefined ? [payload.content] : flatten(payload.components[0]);
             sent.push({ src: source.id, title: entry.title, kind: verdict.kind.label, emoji: verdict.kind.emoji, lines, button: verdict.button ?? '내용 보기', thumb: !!verdict.thumb, url: entry.url, plain: payload.content !== undefined, flags: payload.flags ?? 0 });
@@ -70,12 +71,14 @@ async function run(w, minutes, step = 1) {
 }
 
 // ── 가짜 응답 만들기 ────────────────────────────────────────────
-// 공식 패치노트는 스팀 공개 뉴스 API(캡콤 공지)로 받는다. 호출부는 [버전, 날짜, 종류, 플랫폼] 목록 그대로 쓰고, 여기서 스팀 응답 모양으로 바꾼다.
-const officialHtml = list => JSON.stringify({ appnews: { appid: 2246340, newsitems: list.map(([v, , kinds], i) => ({
-    gid: String(parseInt(v.replace(/\D/g, ''), 10)), title: `Update Summary (${v})`, feedname: 'steam_community_announcements',
-    date: Math.floor(((clock?.t ?? T0) - 60_000 - i * 3600_000) / 1000), url: 'https://steamstore-a.akamaihd.net/x',
-    contents: `[h3]Release Date[/h3] Tuesday [b]${kinds.join(' / ')}[/b] https://example.com/x`,
-})) } });
+// 공식 패치노트는 스팀의 한국어 공지 목록으로 받는다. 호출부는 [버전, 날짜, 종류, 플랫폼] 목록 그대로 쓰고, 여기서 스팀 응답 모양으로 바꾼다.
+// 버전이 'EN:' 으로 시작하면 한글 번역이 아직 없는 영문 제목으로 만든다.
+const officialHtml = list => JSON.stringify({ events: list.map(([v, , kinds], i) => {
+    const en = v.startsWith('EN:'); const ver = v.replace('EN:', '');
+    return { gid: String(parseInt(ver.replace(/\D/g, ''), 10)), event_name: en ? `Update Summary (${ver})` : `업데이트 개요 (${ver})`,
+        rtime32_start_time: Math.floor(((clock?.t ?? T0) - 60_000 - i * 3600_000) / 1000),
+        announcement_body: { body: ['[h2][b]배포일[/b][/h2]', '[b]2026년 11월 11일(수)[/b]', '[list]', `[*] ${kinds.join(' / ')}`, '[/list] https://example.com/x'].join('\n') } };
+}) });
 const dcRow = (num, title, at) => `<tr class="ub-content us-post" data-no="${num}"> <td class="gall_num">${num}</td> <td class="gall_subject">🕊공식</td> <td class="gall_tit ub-word"> <a href="/mgallery/board/view/?id=capcommh&no=${num}&search_head=140&page=1" view-msg =""> <em class="icon_img icon_recomimg"></em>${title}</a> <a class="reply_numbox" href="#"><span class="reply_num">[3]</span></a> </td> <td class="gall_date" title="${kst(at)}">10:05</td> </tr>`;
 const dcHtml = rows => `<table><tr class="ub-content "><td class="gall_num">-</td><td class="gall_subject"><b>설문</b></td><td class="gall_tit ub-word"><a href="javascript:;"><b>광고 줄</b></a></td></tr>${rows.map(r => dcRow(...r)).join('')}</table>`;
 const dcView = text => `<div class="gallview"><div class="write_div" style="x"><div>${text}</div></div><div class="btn_recommend_box">추천</div><div id="comment_wrap">댓글: 와일즈 와일즈 와일즈 도배 댓글입니다</div></div>`;
@@ -112,11 +115,12 @@ test('02 공식 새 버전이 올라오면 카드 1개, 다시 확인해도 중�
     routes.official = officialHtml([['Ver.1.042.00.04', '2026년 11월 11일(수)', ['주요 추가 요소 / 사양 변경', '오류 수정'], ['PS5', 'XSX|S', 'Steam']], ['Ver.1.042.00.03', '2026년 10월 27일(화)', ['오류 수정'], ['PS5', 'Steam']]]);
     await run(w, 40);
     const o = sent.filter(s => s.src === 'official');
-    assert.equal(o.length, 1);
-    assert.equal(o[0].title, 'Update Summary (Ver.1.042.00.04)');
+    assert.equal(o.length, 1, `보낸 것 ${sent.length}개, 실패: ${JSON.stringify(setup.fails)}, 기록: ${JSON.stringify(setup.logs)}, 요청: ${JSON.stringify(calls)}`);
+    assert.equal(o[0].title, '업데이트 개요 (Ver.1.042.00.04)');
     assert.ok(o[0].lines.join(' ').includes('주요 추가 요소'), o[0].lines.join(' | ')); // 본문 요약(서식 표시 제거)
-    assert.ok(!o[0].lines.join(' ').includes('[h3]') && !o[0].lines.join(' ').includes('https://'));
-    record('공식 패치노트 새 버전(스팀 공식 공지)', '카드 1개(본문 요약 포함), 재확인해도 중복 없음', true);
+    assert.ok(!o[0].lines.join(' ').includes('[h2]') && !o[0].lines.join(' ').includes('https://'));
+    assert.ok(o[0].lines.join(' ').includes('배포일 2026년 11월 11일(수)'), o[0].lines.join(' | '));
+    record('공식 패치노트 새 버전(스팀 한국어 공지)', '한글 카드 1개(배포일·본문 요약 포함), 재확인해도 중복 없음', true);
 });
 
 test('03 디시: 섞인 글 6개 중 와일즈 소식 2개만 올린다', async () => {
@@ -182,12 +186,12 @@ test('06 사이트가 막혀도(403) 간격을 늘려 요청을 아끼고, 풀�
     routes.official = 403;
     await run(w, 120);
     const during = calls.official - before;
-    assert.ok(during <= 7, `120분 동안 요청 ${during}번(백오프 없으면 12번)`);
+    assert.ok(during <= 12, `120분 동안 요청 ${during}번(백오프 없으면 40번)`);
     assert.ok(setup.fails.some(f => f.startsWith('official:HTTP 403')));
     routes.official = officialHtml([['Ver.1.042.00.05', '2026년 11월 11일(수)', ['오류 수정'], ['Steam']], ['Ver.1.042.00.03', '2026년 10월 27일(화)', ['오류 수정'], ['PS5', 'Steam']]]);
     await run(w, 70);
     assert.equal(sent.filter(s => s.src === 'official').length, 1);
-    record('사이트 차단/장애', `120분간 요청 ${during}번(제한 없으면 12번), 풀린 뒤 새 버전 정상 알림`, true, { during });
+    record('사이트 차단/장애', `120분간 요청 ${during}번(제한 없으면 40번), 풀린 뒤 새 버전 정상 알림`, true, { during });
 });
 
 test('07 디스코드 전송이 실패하면 글을 잃지 않고 다시 시도해 정확히 1번만 올린다', async () => {
@@ -288,4 +292,20 @@ test('14 성능: 큰 응답·이상한 응답도 빠르고 가볍게 처리한�
     assert.ok(dcMs < 50, `디시 목록 파싱 ${dcMs.toFixed(1)}ms`);
     assert.ok(junkMs < 1500, `비정상 3MB 응답 처리 ${junkMs.toFixed(0)}ms`);
     record('성능', `디시 목록(약 300KB) 파싱 ${dcMs.toFixed(1)}ms · 비정상 3MB 응답 ${junkMs.toFixed(0)}ms · 힙 증가 ${heapMB.toFixed(1)}MB`, true, { dcMs, junkMs, heapMB });
+});
+
+test('15 영문만 올라온 패치 공지는 올리지 않고 기다리다가, 한글판이 올라오면 한 번만 올린다', async () => {
+    const { w } = setup({ init: baseInit() });
+    await run(w, 12);
+    const list = v => [[v, '', ['오류 수정'], ['Steam']], ['Ver.1.042.00.03', '', ['오류 수정'], ['Steam']]];
+    routes.official = officialHtml(list('EN:Ver.1.042.00.07'));
+    await run(w, 40);
+    assert.equal(sent.filter(s => s.src === 'official').length, 0, '영문 제목은 올리면 안 됨');
+    assert.ok(setup.logs.some(m => m.includes('한글판을 기다리는 중')));
+    routes.official = officialHtml(list('Ver.1.042.00.07')); // 같은 번호의 한글판 등장
+    await run(w, 40);
+    const o = sent.filter(s => s.src === 'official');
+    assert.equal(o.length, 1);
+    assert.equal(o[0].title, '업데이트 개요 (Ver.1.042.00.07)');
+    record('한글 번역 대기', '영문 공지는 보류, 한글판이 올라오면 한글 카드 1개만 올림', true);
 });

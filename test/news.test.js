@@ -44,6 +44,12 @@ test('디시 분류', () => {
     assert.equal(c('와일즈 게임스컴 참여 안내').kind.id, 'event');
     assert.equal(c('즈3 100만장 팔렸다고하네').action, 'skip');
     assert.equal(c('스위치2 와일즈 체험판 10월 20일 배포.jpg').action, 'include');
+    // 버전 번호만 있어도 와일즈 패치 소식(팬이 올린 패치노트 글을 빨리 알리기 위해)
+    assert.equal(c('Ver.1.043 패치노트 공개.jpg').action, 'include');
+    assert.equal(c('Ver.1.043 패치노트 공개.jpg').kind.id, 'patch');
+    assert.equal(c('1.043 업데이트 내역').action, 'include');
+    assert.equal(c('아웃랜더스 Ver.1.043 패치 안내').action, 'skip'); // 다른 게임은 여전히 제외
+    assert.equal(c('Ver.2.1 패치 안내').action, 'skip');            // 와일즈 버전 꼴이 아니면 제외
 });
 
 test('행사 본문: 어센던스 언급은 참여, 없으면 불참, 이미지뿐이면 확인 불가', () => {
@@ -124,24 +130,32 @@ test('출처별 이모지·썸네일 매칭', () => {
     assert.match(buildPayload(sources.youtube, entry, { include: true, kind: { label: 'k', emoji: 'E' }, plainLink: true }, {}).content, /^-# E k/);
 });
 
-test('스팀 공식 공지 파싱·분류: 패치·점검만 올린다', () => {
-    const json = JSON.stringify({ appnews: { newsitems: [
-        { gid: '1', title: 'Update Summary (Ver.1.042.00.03)', date: 1793000000, contents: '[h3]Notice[/h3] You must install the latest version https://x.y/z {STEAM_CLAN_IMAGE}/a.png' },
-        { gid: '2', title: 'Update Ver. 1.042 — Maintenance Notice', date: 1792000000, contents: 'Maintenance on Monday' },
-        { gid: '3', title: 'Khezu Stretches into Monster Hunter Wilds: Ascendance!', date: 1791000000, contents: 'video' },
-        { gid: '4', title: 'From August 4, Monster Hunter Wilds is Available at a New Price', date: 1790000000, contents: 'price' },
-        { title: '번호 없음' },
-    ] } });
-    const r = p.parseSteamNews(json);
-    assert.equal(r.length, 4);
+test('스팀 한국어 공지 파싱·분류: 한글 패치·점검만 올리고, 영문만 있으면 한글판을 기다린다', () => {
+    const ev = (gid, name, body, extra = {}) => ({ gid, event_name: name, rtime32_start_time: 1793000000, announcement_body: { body }, ...extra });
+    const json = JSON.stringify({ events: [
+        ev('1', '업데이트 개요 (Ver.1.042.00.03)', ['[h2][b]배포일[/b][/h2]', '[b]2026년 10월 27일(화)[/b]', '본문', '[list]', '[*] 일부 AMD 그래픽 카드에서 강제 종료 현상을 개선했습니다', '[*] 통신 오류를 개선했습니다', '[/list]'].join('\n')),
+        ev('2', '업데이트 Ver1.042 점검 안내', '점검 안내 본문 https://x.y/z {STEAM_CLAN_IMAGE}/a.png'),
+        ev('3', 'Monster Hunter Wilds: Ascendance에 푸루푸루 등장!', '영상'),
+        ev('4', 'Update Summary (Ver.1.042.00.05)', 'English only'),
+        ev('5', 'Fight alongside Wilds Monsters in Stories 3!', 'english'),
+        ev('6', '숨겨진 공지 업데이트', 'x', { published: 0 }),
+        { event_name: '번호 없음' },
+    ] });
+    const r = p.parseSteamEvents(json);
+    assert.equal(r.length, 5);
     assert.equal(r[0].key, 'steam-1');
-    assert.equal(r[0].url, 'https://store.steampowered.com/news/app/2246340/view/1');
-    assert.equal(r[0].summary, 'Notice You must install the latest version');
+    assert.equal(r[0].url, 'https://store.steampowered.com/news/app/2246340/view/1?l=koreana');
+    assert.equal(r[0].dateText, '2026년 10월 27일(화)');
+    assert.equal(r[0].summary, '일부 AMD 그래픽 카드에서 강제 종료 현상을 개선했습니다 · 통신 오류를 개선했습니다');
     assert.equal(r[0].at, 1793000000 * 1000);
-    assert.deepEqual(r.map(x => p.classifySteam(x.title).include), [true, true, false, false]);
-    assert.equal(p.classifySteam(r[0].title).kind.id, 'patch');
-    assert.equal(p.classifySteam(r[1].title).kind.id, 'maintenance');
-    assert.deepEqual(p.parseSteamNews('not json'), []);
+    assert.equal(r[1].summary, '점검 안내 본문');
+    const cls = r.map(x => p.classifySteam(x.title));
+    assert.deepEqual(cls.map(c => c.include), [true, true, false, false, false]);
+    assert.equal(cls[0].kind.id, 'patch');
+    assert.equal(cls[1].kind.id, 'maintenance');
+    assert.equal(cls[3].defer, true);   // 영문 패치 공지 → 한글판 대기
+    assert.equal(cls[4].defer, undefined); // 영문이지만 패치와 무관
+    assert.deepEqual(p.parseSteamEvents('not json'), []);
 });
 
 test('제목 유사도', () => {

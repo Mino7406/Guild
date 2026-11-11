@@ -97,9 +97,12 @@ function kindOf(title) {
 const VIDEO_RE = /트레일러|티저|\bPV\b|영상|무기\s*소개|유튜브|youtube/i;
 
 // 1단계: 제목만으로 판단. action = 'include' | 'skip' | 'checkBody'
+// 와일즈 버전 번호(Ver.1.042 같은 1.0xx 꼴)가 제목에 있으면 '와일즈'라는 글자가 없어도 와일즈 패치 소식으로 본다(팬들이 올리는 패치노트 글을 놓치지 않으려고)
+const WILDS_VER_RE = /\bVer\.?\s*1\.0\d{2}|(?:^|\s)1\.0[4-9]\d\s*(?:패치|업데이트)/i;
 function classifyTitle(title) {
-    const wilds = WILDS_RE.test(title);
-    if (OTHER_GAME_RE.test(title) && !wilds) return { action: 'skip', reason: '다른 게임' };
+    const named = WILDS_RE.test(title);              // 제목에 와일즈·어센던스가 직접 있음
+    const wilds = named || WILDS_VER_RE.test(title);  // 버전 번호 꼴만으로도 와일즈 소식으로 본다
+    if (OTHER_GAME_RE.test(title) && !named) return { action: 'skip', reason: '다른 게임' }; // 다른 게임 이름이 있으면 버전 번호만으로는 통과시키지 않는다
     if (EVENT_RE.test(title)) {
         // 행사 글은 제목에 와일즈가 없으면 본문에서 참여 여부를 확인한다
         return wilds ? { action: 'include', kind: EVENT_KIND } : { action: 'checkBody', kind: EVENT_KIND };
@@ -133,9 +136,10 @@ function classifyYoutube(title) {
     return { include: true };
 }
 
-// ── 스팀 공식 공지(캡콤이 올리는 업데이트 요약·점검 공지) ──────────────────────────
-// 공식 업데이트 사이트(info.monsterhunter.com)가 서버 접속을 막아서, 같은 내용을 스팀의 공개 뉴스 API 로 받는다.
-const STEAM_NEWS_API = 'https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=2246340&count=15&maxlength=600&feeds=steam_community_announcements&format=json';
+// ── 스팀 공식 공지(캡콤이 올리는 업데이트 개요·점검 공지, 한국어판) ─────────────────────
+// 공식 업데이트 사이트(info.monsterhunter.com)가 서버 접속을 막아서, 같은 공지를 스팀의 공개 이벤트·공지 목록(한국어, l=koreana)으로 받는다.
+// 한글 번역이 아직 안 올라온 영문 공지는 올리지 않고 기다렸다가, 한글판이 올라오면 올린다(defer).
+const STEAM_EVENTS_API = 'https://store.steampowered.com/events/ajaxgetpartnereventspageable/?clan_accountid=0&appid=2246340&offset=0&count=15&l=koreana&origin=https://store.steampowered.com';
 const PATCH_KIND = { id: 'patch', label: '패치노트', emoji: '📢' };
 const MAINT_KIND = { id: 'maintenance', label: '점검 예고', emoji: '🛠️' };
 function cleanSteamText(s) {
@@ -144,29 +148,41 @@ function cleanSteamText(s) {
         .replace(/\{STEAM_CLAN_IMAGE\}\S*/g, ' ').replace(/https?:\/\/\S+/g, ' ')
         .replace(/\s+/g, ' ').trim();
 }
-function parseSteamNews(jsonText) {
-    let items;
-    try { items = JSON.parse(jsonText)?.appnews?.newsitems; } catch { return []; }
-    if (!Array.isArray(items)) return [];
+// 본문 요약: 목록 항목([*])이 있으면 앞의 3개(보통 수정·변경 내용), 없으면 본문 앞부분
+function steamSummary(body, maxChars = 240) {
+    const items = String(body ?? '').split('[*]').slice(1)
+        .map(x => cleanSteamText(x.split(/\[\/list\]/i)[0])).filter(Boolean).slice(0, 3);
+    const text = items.length ? items.join(' · ') : cleanSteamText(body);
+    return text.length > maxChars ? `${text.slice(0, maxChars - 1)}…` : text;
+}
+function parseSteamEvents(jsonText) {
+    let events;
+    try { events = JSON.parse(jsonText)?.events; } catch { return []; }
+    if (!Array.isArray(events)) return [];
     const out = [];
-    for (const n of items) {
-        if (!n || n.gid == null || typeof n.title !== 'string') continue;
-        const at = Number(n.date) * 1000;
-        const summary = cleanSteamText(n.contents);
+    for (const e of events) {
+        if (!e || e.gid == null || typeof e.event_name !== 'string' || e.published === 0) continue;
+        const body = String(e.announcement_body?.body ?? '');
+        const at = Number(e.rtime32_start_time) * 1000;
         out.push({
-            key: `steam-${n.gid}`, title: n.title.trim(),
-            url: `https://store.steampowered.com/news/app/2246340/view/${n.gid}`,
+            key: `steam-${e.gid}`, title: e.event_name.trim(),
+            url: `https://store.steampowered.com/news/app/2246340/view/${e.gid}?l=koreana`,
             at: Number.isFinite(at) && at > 0 ? at : null,
-            summary: summary.length > 240 ? `${summary.slice(0, 239)}…` : summary,
+            dateText: body.match(/배포\s*일(?:시)?[\s\S]{0,30}?(\d{4}년\s*\d{1,2}월\s*\d{1,2}일(?:\([^)]*\))?)/)?.[1] ?? null,
+            summary: steamSummary(body),
         });
     }
     return out;
 }
-// 패치·점검 공지만 올린다(영상·가격·행사 공지는 다른 출처가 맡는다)
-const STEAM_PATCH_RE = /Update Summary|Title Update|\bVer\.?\s*\d|Maintenance|Patch|업데이트|점검/i;
+// 패치·점검 공지만 올린다(영상·가격·행사 공지는 다른 출처가 맡는다). 제목에 한글이 있어야 올린다.
+const KO_PATCH_RE = /업데이트|점검|패치|\bVer\.?\s*\d/;
+const EN_PATCH_RE = /Update Summary|Title Update|\bVer\.?\s*\d|Maintenance|Patch/i;
 function classifySteam(title) {
-    if (!STEAM_PATCH_RE.test(title)) return { include: false, reason: '패치·점검 공지 아님' };
-    return { include: true, kind: /Maintenance|점검/i.test(title) ? MAINT_KIND : PATCH_KIND };
+    const hangul = /[가-힣]/.test(title);
+    const kind = /점검|Maintenance/i.test(title) ? MAINT_KIND : PATCH_KIND;
+    if (hangul && KO_PATCH_RE.test(title)) return { include: true, kind };
+    if (!hangul && EN_PATCH_RE.test(title)) return { include: false, defer: true, reason: '한글 번역 대기' };
+    return { include: false, reason: '패치·점검 공지 아님' };
 }
 
 // ── GitHub 릴리즈(REFramework Nightly) ──────────────────────────────────────────
@@ -223,7 +239,7 @@ function confirmBody(body) {
 
 module.exports = {
     parseOfficialList, parseDcList, parseDcBody, parseYoutubePlaylist, parseGithubReleases, REFRAMEWORK_API,
-    parseSteamNews, classifySteam, STEAM_NEWS_API,
+    parseSteamEvents, classifySteam, STEAM_EVENTS_API,
     classifyTitle, confirmBody, classifyYoutube, kindOf, tokenize, similarTitles,
     EVENT_KIND, GENERAL_KIND, OFFICIAL_BASE, YT_UPLOADS_PLAYLIST, KST_MS,
 };
