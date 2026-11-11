@@ -6,7 +6,7 @@ const path = require('path');
 const token = process.env.DISCORD_TOKEN;
 const { Agent, request } = require('undici');
 const { flushAll, createStore } = require('./store');
-const { startNewsWatcher, buildSources, previewSamples, previewRecent, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID } = require('./news/watcher');
+const { startNewsWatcher, getNewsStatus, buildSources, previewSamples, previewRecent, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID } = require('./news/watcher');
 const { decideAccess, canToggleLock } = require('./card-lock');
 
 // 디스코드 API 연결을 60초까지 유지한다. 기본값(약 4초)이면 잠깐만 안 써도 연결이 끊겨서
@@ -526,8 +526,17 @@ const CARD_TABS = new Set(['basic', 'hitzone', 'drop', 'status', 'dropLow', 'dro
 
 // /관리: 임베드 + 버튼 패널 (테스트 서버 전용). 소식 일시정지/재개와 소식 테스트(임베드 샘플·최근 실제 소식)를 한곳에 모았다.
 // 테스트는 운영 기록을 건드리지 않는다.
+// 상태 한 줄: 마지막 성공 시각(상대)과 연속 실패
+function sourceStatusLine(s) {
+    const t = ms => `<t:${Math.floor(ms / 1000)}:R>`;
+    if (s.fails) return `⚠️ **${s.label}** — 연속 ${s.fails}회 실패${s.okAt ? ` (마지막 성공 ${t(s.okAt)})` : ''}${s.error ? `
+　└ ${s.error}` : ''}`;
+    return s.okAt ? `✅ **${s.label}** — ${t(s.okAt)}` : `⏳ **${s.label}** — 아직 확인 전`;
+}
+
 function buildAdminPanel() {
     const paused = isNewsPaused();
+    const status = getNewsStatus();
     const embed = new EmbedBuilder()
         .setColor(paused ? 0xED4245 : 0x57F287)
         .setTitle('🛠️ 길드봇 관리')
@@ -539,6 +548,7 @@ function buildAdminPanel() {
         ].join('\n'));
     const rows = [
         new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('admin_refresh').setLabel('새로고침').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('admin_toggle').setLabel(paused ? '소식 재개' : '소식 일시정지').setEmoji(paused ? '▶️' : '⏸️').setStyle(paused ? ButtonStyle.Success : ButtonStyle.Danger)
         ),
         new ActionRowBuilder().addComponents(
@@ -592,6 +602,7 @@ async function handleAdminInteraction(interaction) {
         console.log(`[소식] ${adminStore.data.newsPaused ? '일시정지' : '재개'} (by ${interaction.user.tag})`);
         return interaction.update(buildAdminPanel());
     }
+    if (interaction.customId === 'admin_refresh') return interaction.update(buildAdminPanel());
     const mode = interaction.customId.replace('admin_test_', '');
     if (['samples', 'recent', 'both'].includes(mode)) return runNewsPreview(interaction, mode);
 }

@@ -205,6 +205,9 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
     state.recent ??= [];
     state.cards ??= {};      // 버전별로 먼저 나간 카드(메시지 id) — 나중에 스팀 상세로 고치기 위해
     state.versions ??= [];   // 이미 알린 패치 버전(디시에서 같은 버전을 여러 사람이 올려도 한 번만 알리기 위해)
+    // 점검용 기록(/관리 패널에 표시): 출처별 마지막 성공/실패 시각·연속 실패 횟수, 날짜별 올린 소식 수
+    state.stats ??= { sources: {}, days: {} };
+    const dayKey = () => new Date(now() + 9 * 3600_000).toISOString().slice(0, 10); // 한국 날짜
     const runtime = new Map(sources.map((s, i) => [s.id, { nextAt: now() + i * STAGGER_MS, fails: 0 }]));
 
     // 다른 출처가 최근 2주 안에 올린 카드와 제목이 많이 겹치면 같은 소식으로 본다.
@@ -353,18 +356,41 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
             for (const source of sources) {
                 const rt = runtime.get(source.id);
                 if (now() < rt.nextAt) continue;
-                try { await checkSource(source); rt.fails = 0; } catch (err) { rt.fails++; logFail(source, err); }
+                const ss = state.stats.sources[source.id] ??= {};
+                try {
+                    const n = await checkSource(source);
+                    rt.fails = 0;
+                    ss.okAt = now(); ss.fails = 0;
+                    if (n) {
+                        const d = dayKey();
+                        state.stats.days[d] = (state.stats.days[d] ?? 0) + n;
+                        for (const k of Object.keys(state.stats.days).sort().slice(0, -7)) delete state.stats.days[k];
+                    }
+                } catch (err) {
+                    rt.fails++; logFail(source, err);
+                    ss.failAt = now(); ss.fails = rt.fails; ss.error = String(err.message).slice(0, 80);
+                }
+                store.save();
                 rt.nextAt = now() + (rt.fails ? source.pollMs * Math.min(MAX_BACKOFF, 2 ** (rt.fails - 1)) : source.pollMs);
             }
         } finally {
             running = false;
         }
     }
-    return { checkSource, tick };
+    // /관리 패널용 요약
+    function status() {
+        return {
+            today: state.stats.days[dayKey()] ?? 0,
+            sources: sources.map(src => ({ id: src.id, label: src.label, ...state.stats.sources[src.id] })),
+        };
+    }
+    return { checkSource, tick, status };
 }
 
 // 같은 오류가 계속 나도 로그를 도배하지 않게 출처별로 1시간에 한 번만 남긴다.
 let timer = null;
+let currentWatcher = null;
+const getNewsStatus = () => currentWatcher?.status() ?? null;
 function startNewsWatcher(client, store, isPaused = () => false) {
     if (timer) return;
     const sources = buildSources();
@@ -410,6 +436,7 @@ function startNewsWatcher(client, store, isPaused = () => false) {
         },
         logInfo: msg => console.log(`[소식] ${msg}`),
     });
+    currentWatcher = watcher;
     // 일시정지 중에는 확인도 알림도 하지 않는다(재개하면 그때부터 다시 확인)
     const run = () => { if (!isPaused()) watcher.tick().catch(e => console.error('[소식] 확인 오류:', e)); };
     timer = setInterval(run, TICK_MS);
@@ -553,6 +580,6 @@ async function previewSamples({ sources, post, edit, emojiIds = {}, wait = ms =>
 }
 
 module.exports = {
-    startNewsWatcher, createWatcher, buildSources, buildPayload, NEWS_CHANNEL_ID, EMOJI_NAMES, EmptyListError,
+    startNewsWatcher, getNewsStatus, createWatcher, buildSources, buildPayload, NEWS_CHANNEL_ID, EMOJI_NAMES, EmptyListError,
     collectRecent, previewRecent, previewSamples, buildSamples, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID,
 };
