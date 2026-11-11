@@ -43,11 +43,12 @@ const GLOBAL_COMMANDS = [
 
 // 소식 기능 일시정지 상태 (꺼졌다 켜져도 유지)
 const adminStore = createStore('admin', { newsPaused: false });
-// /관리 사용 가능: 서버 관리자 권한이 있는 사람 또는 아래 지정 유저
-const ADMIN_USER_IDS = ['457437911869161472'];
-// 다른 서버의 관리자가 이 봇의 소식 기능을 멈추지 못하도록, 서버 관리자 권한은 테스트 서버에서만 인정한다(다른 서버는 지정 유저만).
-const canUseAdmin = interaction => ADMIN_USER_IDS.includes(interaction.user.id)
-    || (interaction.guildId === NEWS_TEST_GUILD_ID && !!interaction.memberPermissions?.has('Administrator'));
+// /관리 사용 가능: .env 의 ADMIN_ID(쉼표로 여러 명: ADMIN_ID=111,222)에 적힌 유저만. 서버 관리자 권한은 보지 않는다.
+// ADMIN_ID 가 없으면 아래 기본 유저 한 명만 허용한다.
+const DEFAULT_ADMIN_ID = '457437911869161472';
+const ADMIN_USER_IDS = String(process.env.ADMIN_ID ?? process.env.admin_id ?? DEFAULT_ADMIN_ID).split(/[\s,]+/).filter(id => /^\d{15,25}$/.test(id));
+if (!ADMIN_USER_IDS.length) console.error('[설정 오류] ADMIN_ID 에 올바른 유저 ID가 없어 /관리를 아무도 쓸 수 없습니다.');
+const canUseAdmin = interaction => ADMIN_USER_IDS.includes(interaction.user.id);
 const isNewsPaused = () => !!adminStore.data.newsPaused;
 
 // 응답이 느릴 때 원인을 볼 수 있도록 기록하는 기준 (디스코드 응답 제한은 3초)
