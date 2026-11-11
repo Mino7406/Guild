@@ -598,11 +598,35 @@ async function runNewsPreview(interaction, mode) {
     }
 }
 
-// 최근에 올린 소식 목록(최대 25개)을 고르는 메뉴
-function buildDeleteList() {
-    const posts = getNewsPosts();
-    if (!posts.length) return adminNotice('지울 수 있는 최근 소식이 없습니다. (이번 업데이트 이후 올라온 소식부터 목록에 나와요)');
-    return adminNotice('지울 소식을 고르세요.', [new ActionRowBuilder().addComponents(
+// 소식 채널 기록에서 길드 봇이 올린 소식을 읽어 온다(카드 글자에서 제목·종류를 뽑는다). 재시작·업데이트 전에 올라온 소식도 포함된다.
+function describeNewsMessage(m) {
+    const texts = [];
+    const walk = n => {
+        if (!n || typeof n !== 'object') return;
+        if (typeof n.content === 'string') texts.push(n.content);
+        for (const c of [...(n.components || []), ...(n.accessory ? [n.accessory] : [])]) walk(c.toJSON ? c.toJSON() : c);
+    };
+    for (const c of m.components ?? []) walk(c.toJSON ? c.toJSON() : c);
+    const title = texts.find(t => t.startsWith('### '))?.slice(4) || (m.content || '').replace(/\s+/g, ' ').slice(0, 80) || '(제목 없음)';
+    const label = texts.find(t => t.startsWith('-# '))?.slice(3) || (m.content ? '유튜브' : '소식');
+    return { id: m.id, title, label, at: m.createdTimestamp };
+}
+async function fetchRecentNewsPosts(limit = 10) {
+    try {
+        const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
+        const messages = await channel.messages.fetch({ limit: 100 });
+        return [...messages.values()].filter(m => m.author.id === client.user.id).sort((x, y) => y.createdTimestamp - x.createdTimestamp).slice(0, limit).map(describeNewsMessage);
+    } catch (e) {
+        console.error('[소식 삭제 목록] 채널 기록을 읽지 못해 저장된 기록으로 대신함:', e.message);
+        return getNewsPosts().slice(0, limit);
+    }
+}
+
+// 최근에 올린 소식 10개를 고르는 메뉴
+async function buildDeleteList() {
+    const posts = await fetchRecentNewsPosts(10);
+    if (!posts.length) return adminNotice('지울 수 있는 최근 소식이 없습니다.');
+    return adminNotice('지울 소식을 고르세요. (길드 봇이 올린 최근 소식 10개)', [new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder().setCustomId('admin_pick').setPlaceholder('최근 올라온 소식')
             .addOptions(posts.map(p => ({ label: p.title.slice(0, 100) || '(제목 없음)', description: `${p.label} · ${new Date(p.at + 9 * 3600_000).toISOString().slice(5, 16).replace('T', ' ')}`.slice(0, 100), value: p.id })))
     )]);
@@ -645,10 +669,14 @@ async function handleAdminInteraction(interaction) {
     }
     if (interaction.customId === 'admin_refresh') return interaction.update({ components: buildAdminPanel(interaction.guildId).components });
     // 잘못 올라온 소식 삭제: 목록에서 고르고 → 확인 → 채널에서 메시지를 지운다
-    if (interaction.customId === 'admin_delete') return interaction.reply(buildDeleteList());
+    if (interaction.customId === 'admin_delete') {
+        await interaction.deferReply({ flags: V2_EPHEMERAL });   // 채널 기록을 읽는 동안 3초 제한에 걸리지 않게
+        return interaction.editReply({ components: (await buildDeleteList()).components });
+    }
     if (interaction.customId === 'admin_pick') {
         const id = interaction.values[0];
-        const post = getNewsPosts().find(p => p.id === id);
+        let post = null;
+        try { const m = await (await client.channels.fetch(NEWS_CHANNEL_ID)).messages.fetch(id); if (m.author.id === client.user.id) post = describeNewsMessage(m); } catch { /* 이미 지워짐 */ }
         if (!post) return edit('이미 지워졌거나 목록에 없는 소식입니다.');
         return edit(`이 소식을 지울까요? 되돌릴 수 없어요.\n**${post.title}** (${post.label})`, [new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`admin_delok_${id}`).setLabel('삭제').setStyle(ButtonStyle.Danger),
@@ -660,7 +688,9 @@ async function handleAdminInteraction(interaction) {
         const id = interaction.customId.slice('admin_delok_'.length);
         try {
             const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
-            await channel.messages.delete(id);
+            const target = await channel.messages.fetch(id);
+            if (target.author.id !== client.user.id) return edit('길드 봇이 올린 소식만 지울 수 있어요.');   // 다른 사람의 메시지는 지우지 않는다
+            await target.delete();
         } catch (e) {
             if (e.code !== 10008) return edit(`삭제 실패: ${e.message}`); // 10008: 이미 지워진 메시지는 기록만 정리
         }
