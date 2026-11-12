@@ -449,9 +449,16 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
                 // 자동짤방 거르기: 제외 목록의 작성자거나, 같은 작성자가 같은 사진을 전에도 썼으면 사진을 붙이지 않는다
                 state.dcImages ??= {};
                 const imgId = verdict.image ? `${verdict.author ?? '?'}|${verdict.image.key}` : null;
-                if (verdict.image && ((state.noImage ?? []).includes(verdict.author) || state.dcImages[imgId])) {
-                    logInfo(`${source.label}: 반복되는 사진(자동짤방 추정)이라 사진 없이 올림 — ${e.title}`);
-                    delete verdict.image;
+                if (verdict.image) {
+                    const why = (state.noImage ?? []).includes(verdict.author) ? '제외 목록 작성자' : state.dcImages[imgId] ? '같은 작성자가 같은 사진을 전에도 씀' : null;
+                    // 실전 데이터 수집용 한 줄 기록: 나중에 로그에서 '사진 판정'만 모아 반복 작성자를 찾는다(작성자 | 사진키 끝 12자)
+                    logInfo(`사진 판정 ${why ? '제외' : '붙임'}${why ? `(${why})` : ''} — ${verdict.author ?? '?'} | ${String(verdict.image.key).slice(-12)} | ${e.title.slice(0, 30)}`);
+                    if (why) {
+                        logInfo(`${source.label}: 반복되는 사진(자동짤방 추정)이라 사진 없이 올림 — ${e.title}`);
+                        delete verdict.image;
+                    }
+                } else if (source.id === 'dc' || source.id === 'dcbest') {
+                    logInfo(`사진 판정 없음 — ${verdict.author ?? '?'} | 본문에서 사진을 못 찾음 | ${e.title.slice(0, 30)}`);
                 }
                 const messageId = await send(source, e, verdict);
                 if (messageId) state.posted = [...state.posted, { id: messageId, title: String(verdict.title ?? e.title).slice(0, 80), label: source.label, at: now() }].slice(-25);
