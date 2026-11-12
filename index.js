@@ -671,7 +671,14 @@ async function handleAdminInteraction(interaction) {
     // 카드 최신화: 소식 채널의 예전 카드(오른쪽 아이콘이 붙은 것)를 지금 모양으로 고친다. 이미 고쳐진 카드는 건너뛴다.
     if (interaction.customId === 'admin_modernize') {
         await interaction.deferReply({ flags: V2_EPHEMERAL });
-        const finish = t => interaction.editReply({ components: adminNotice(t).components }).catch(() => {});
+        // 결과 표시가 실패하면 원인을 로그에 남기고, 로딩이 멈추지 않는 일이 없게 새 메시지로 한 번 더 알린다
+        const finish = async t => {
+            try { await interaction.editReply({ components: adminNotice(t).components, flags: MessageFlags.IsComponentsV2 }); }
+            catch (e) {
+                console.error('[소식] 카드 최신화 결과 표시 실패:', e.code ?? '', e.message);
+                await interaction.followUp(adminNotice(t)).catch(e2 => console.error('[소식] 카드 최신화 결과 안내도 실패:', e2.message));
+            }
+        };
         try {
             const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
             const messages = await channel.messages.fetch({ limit: 100 });
