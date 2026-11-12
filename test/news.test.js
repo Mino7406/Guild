@@ -184,31 +184,26 @@ test('모든 카드의 버튼은 하나이고 이름은 "내용 보기"로 통�
     assert.deepEqual(b.map(x => [x.label, x.url]), [['🔗 내용 보기', 'https://info.monsterhunter.com/wilds/update/ko-kr/Ver.1.042.00.05.html']]);
 });
 
-test('출처별 이모지·썸네일 매칭', () => {
+test('출처 카드: 오른쪽 아이콘 없이 맨 윗줄에 출처 표기', () => {
     const sources = Object.fromEntries(buildSources({ YOUTUBE_API_KEY: 'k' }).map(s => [s.id, s]));
-    // 이모지 이름과 PNG 파일이 서로 맞는다
+    // 이모지 이름과 PNG 파일은 다시 쓸 수 있게 남아 있다
     assert.deepEqual(EMOJI_NAMES, { official: 'news_wilds', dc: 'news_dcinside', youtube: 'news_youtube', reframework: 'news_github' });
     for (const name of Object.values(EMOJI_NAMES)) assert.ok(fs.existsSync(path.join(__dirname, '..', 'assets', 'emojis', `${name}.png`)), name);
     const ids = { official: '111', dc: '222', youtube: '333', reframework: '444' };
     const entry = { title: '제목', url: 'https://example.com/x', at: 1, kinds: [], platforms: [], summary: '' };
-    const thumbOf = (src) => {
-        const e = sources[src];
-        const v = { include: true, kind: { label: 'k' }, ...(src === 'youtube' ? { videoCard: true } : {}) };
-        const payload = buildPayload(e, entry, v, ids);
-        return payload.components[0].toJSON().components[0].accessory.media.url;
-    };
-    assert.match(thumbOf('official'), /emojis\/111\.png/);
-    assert.match(thumbOf('dc'), /emojis\/222\.png/);
-    assert.match(thumbOf('reframework'), /emojis\/444\.png/);
-    // 유튜브는 영상 임베드가 있는 일반 메시지: 맨 위 소제목 앞에 이모지를 붙이지 않는다(이모지 id가 있어도 마찬가지)
-    assert.match(thumbOf('youtube'), /emojis\/333\.png/);
-    for (const id of ['official', 'dc', 'reframework']) {
-        const head = buildPayload(sources[id], entry, { include: true, kind: { label: '패치노트' } }, { [id]: '1' }).components[0].toJSON().components[0].components[0].content;
-        assert.ok(/^-# 패치노트 · /.test(head) && !/\p{Extended_Pictographic}/u.test(head), `${id}: ${head}`);
+    for (const id of ['official', 'dc', 'dcbest', 'reframework', 'youtube']) {
+        // 이모지가 등록돼 있어도, 썸네일 값이 있어도 오른쪽 아이콘(썸네일)은 붙지 않는다
+        const v = { include: true, kind: { label: '패치노트' }, thumb: 'https://x/share.png', ...(id === 'youtube' ? { videoCard: true } : {}) };
+        const json = buildPayload(sources[id], entry, v, ids).components[0].toJSON();
+        assert.ok(!/emojis\/|share\.png/.test(JSON.stringify(json)), `${id}: 아이콘이 남아 있음`);
+        assert.ok(json.components.every(c => !c.accessory), `${id}: 썸네일 섹션이 남아 있음`);
+        // 출처는 맨 윗줄 '종류 · 출처'로 유지된다(이모지 없이)
+        const head = json.components[0].content;
+        assert.equal(head, `-# 패치노트 · ${sources[id].label}`, id);
     }
-    // 이모지가 아직 없으면 예전 방식으로 보낸다(공식은 공식 이미지, 유튜브는 기본 이모지)
-    const off = buildPayload(sources.official, entry, { include: true, kind: { label: 'k' }, thumb: 'https://x/share.png' }, {});
-    assert.equal(off.components[0].toJSON().components[0].accessory.media.url, 'https://x/share.png');
+    // 공식 링크가 확인된 디시 글은 공식 출처 이름으로 표기된다
+    const fan = buildPayload(sources.dc, entry, { include: true, kind: { label: '패치노트' }, sourceLabel: 'Update Information', emojiSource: 'official' }, ids).components[0].toJSON();
+    assert.equal(fan.components[0].content, '-# 패치노트 · Update Information');
     // 유튜브 카드: 영상 썸네일(큰 이미지)이 들어간다
     const yt = buildPayload(sources.youtube, { ...entry, url: 'https://www.youtube.com/watch?v=ll0G8-nbT7o' }, { include: true, kind: { label: 'k' }, videoCard: true }, {});
     assert.match(JSON.stringify(yt.components[0].toJSON()), /i\.ytimg\.com\/vi\/ll0G8-nbT7o\/maxresdefault\.jpg/);

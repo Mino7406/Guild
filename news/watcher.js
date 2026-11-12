@@ -18,7 +18,7 @@
 //  - 다른 출처가 같은 소식을 이미 올렸으면(제목이 많이 겹침, 24시간 안) 올리지 않는다.
 
 const {
-    AttachmentBuilder, ContainerBuilder, SectionBuilder, TextDisplayBuilder, ThumbnailBuilder, MediaGalleryBuilder, MediaGalleryItemBuilder,
+    AttachmentBuilder, ContainerBuilder, TextDisplayBuilder, MediaGalleryBuilder, MediaGalleryItemBuilder,
     ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags,
 } = require('discord.js');
 const parse = require('./parse');
@@ -209,15 +209,13 @@ function dayText(at) {
     return `${d.getUTCMonth() + 1}월 ${d.getUTCDate()}일`;
 }
 
-// 출처별 봇 전용(애플리케이션) 이모지 — deploy/register-emojis.js 가 등록한 이름. 카드 썸네일에 쓴다(맨 위 소제목 앞에는 이모지를 붙이지 않는다).
+// 출처별 봇 전용(애플리케이션) 이모지 — deploy/register-emojis.js 가 등록한 이름. 지금은 카드에 붙이지 않는다(오른쪽 아이콘 제거, 출처는 맨 윗줄 글자와 색 띠로 구분). 다시 쓸 수 있게 이름과 조회는 남겨 둔다.
 const EMOJI_NAMES = { official: 'news_wilds', dc: 'news_dcinside', youtube: 'news_youtube', reframework: 'news_github' };
 const BUTTON_LABEL = '🔗 내용 보기';
-const emojiThumb = id => `https://cdn.discordapp.com/emojis/${id}.png?size=128`;
 
-// emojiIds: { 출처id: 이모지ID } — 아직 등록 전이면 비어 있고, 그러면 예전 방식(기본 이모지·공식 이미지)으로 보낸다.
+// emojiIds: { 출처id: 이모지ID } — 카드 아이콘을 다시 붙일 때를 위해 받기만 하고 지금은 쓰지 않는다.
 function buildPayload(source, entry, verdict, emojiIds = {}) {
     const kind = verdict.kind;
-    const emojiId = emojiIds[verdict.emojiSource ?? source.id];
     const sourceLabel = verdict.sourceLabel ?? source.label;   // 디시 글이라도 공식 링크가 확인되면 공식으로 표기
     const url = verdict.url ?? entry.url;
     const rawTitle = verdict.title ?? entry.title;
@@ -227,18 +225,10 @@ function buildPayload(source, entry, verdict, emojiIds = {}) {
     if (verdict.detail) texts.push(verdict.detail.slice(0, verdict.detailMax ?? 300));
     if (sub) texts.push(`-# ${sub}`);
 
-    const thumbUrl = emojiId ? emojiThumb(emojiId) : verdict.thumb;
-    // 썸네일이 붙는 섹션은 텍스트를 3개까지만 넣을 수 있다(디스코드 규칙). 넘치면 제목 아래 줄들을 하나로 합친다.
-    const parts = thumbUrl && texts.length > 3 ? [texts[0], texts[1], texts.slice(2).join('\n')] : texts;
-    const lines = parts.map(t => new TextDisplayBuilder().setContent(t));
+    const lines = texts.map(t => new TextDisplayBuilder().setContent(t));
 
     const container = new ContainerBuilder().setAccentColor(ACCENTS[verdict.emojiSource ?? source.id] ?? ACCENT);
-    if (thumbUrl) {
-        const thumb = new ThumbnailBuilder().setURL(thumbUrl).setDescription(sourceLabel.slice(0, 100));
-        container.addSectionComponents(new SectionBuilder().addTextDisplayComponents(...lines).setThumbnailAccessory(thumb));
-    } else {
-        container.addTextDisplayComponents(...lines);
-    }
+    container.addTextDisplayComponents(...lines);   // 오른쪽 아이콘(썸네일) 없이 글만 넣는다. 출처는 맨 윗줄 '종류 · 출처'로 보인다
     // 유튜브 영상: 영상 썸네일을 카드 안에 크게 보여 준다(디스코드 영상 임베드는 카드에서 쓸 수 없다)
     const videoId = verdict.videoCard ? /[?&]v=([\w-]{11})/.exec(entry.url)?.[1] : null;
     if (videoId) {
