@@ -575,7 +575,7 @@ async function runNewsPreview(interaction, mode) {
     if (newsPreviewRunning) return interaction.reply(adminNotice('이미 올리는 중입니다. 끝난 뒤에 다시 눌러 주세요.'));
     newsPreviewRunning = true;
     await interaction.deferReply({ flags: V2_EPHEMERAL });
-    const finish = text => interaction.editReply({ components: adminNotice(text).components }).catch(() => {});
+    const finish = text => interaction.editReply({ flags: MessageFlags.IsComponentsV2, components: adminNotice(text).components }).catch(() => {});
     try {
         const channel = await client.channels.fetch(NEWS_TEST_CHANNEL_ID);
         if (!channel?.isTextBased()) throw new Error(`테스트 채널을 찾을 수 없음(${NEWS_TEST_CHANNEL_ID})`);
@@ -730,9 +730,9 @@ async function handleAdminInteraction(interaction) {
         try {
             const get = id => interaction.fields.getTextInputValue(id);
             const message = await sendCustomNews(client, { title: get('title'), body: get('body'), url: get('url'), imageUrl: get('image'), label: get('label') });
-            return interaction.editReply({ components: adminNotice(`📝 소식을 올렸습니다. https://discord.com/channels/${message.guildId}/${message.channelId}/${message.id}`).components });
+            return interaction.editReply({ flags: MessageFlags.IsComponentsV2, components: adminNotice(`📝 소식을 올렸습니다. https://discord.com/channels/${message.guildId}/${message.channelId}/${message.id}`).components });
         } catch (e) {
-            return interaction.editReply({ components: adminNotice(`올리지 못했습니다: ${e.message}`).components });
+            return interaction.editReply({ flags: MessageFlags.IsComponentsV2, components: adminNotice(`올리지 못했습니다: ${e.message}`).components });
         }
     }
     // 이미 떠 있는 메시지를 고치는 응답(v2 표시는 메시지에 이미 있어서 components 만 보낸다)
@@ -746,8 +746,8 @@ async function handleAdminInteraction(interaction) {
     // 소식 편집: 카드 고르기 → (제목·내용·링크·사진 주소 수정 | 디시 원글 사진 고르기)
     if (interaction.customId === 'admin_edit') {
         await interaction.deferReply({ flags: V2_EPHEMERAL });
-        try { return await interaction.editReply({ components: (await buildEditCardList()).components }); }
-        catch (e) { return interaction.editReply({ components: adminNotice(`실패: ${e.message}`).components }); }
+        try { return await interaction.editReply({ flags: MessageFlags.IsComponentsV2, components: (await buildEditCardList()).components }); }
+        catch (e) { return interaction.editReply({ flags: MessageFlags.IsComponentsV2, components: adminNotice(`실패: ${e.message}`).components }); }
     }
     if (interaction.customId === 'admin_editpick') {
         const id = interaction.values[0];
@@ -779,7 +779,7 @@ async function handleAdminInteraction(interaction) {
     }
     if (interaction.isModalSubmit() && interaction.customId.startsWith('admin_editsubmit_')) {
         await interaction.deferReply({ flags: V2_EPHEMERAL });
-        const done = t => interaction.editReply({ components: adminNotice(t).components });
+        const done = t => interaction.editReply({ flags: MessageFlags.IsComponentsV2, components: adminNotice(t).components });
         try {
             const id = interaction.customId.slice('admin_editsubmit_'.length);
             const m = await (await client.channels.fetch(NEWS_CHANNEL_ID)).messages.fetch(id);
@@ -847,7 +847,7 @@ async function handleAdminInteraction(interaction) {
     // 잘못 올라온 소식 삭제: 목록에서 고르고 → 확인 → 채널에서 메시지를 지운다
     if (interaction.customId === 'admin_delete') {
         await interaction.deferReply({ flags: V2_EPHEMERAL });   // 채널 기록을 읽는 동안 3초 제한에 걸리지 않게
-        return interaction.editReply({ components: (await buildDeleteList()).components });
+        return interaction.editReply({ flags: MessageFlags.IsComponentsV2, components: (await buildDeleteList()).components });
     }
     if (interaction.customId === 'admin_pick') {
         const id = interaction.values[0];
