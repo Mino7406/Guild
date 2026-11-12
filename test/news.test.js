@@ -397,3 +397,29 @@ test('카드 최신화: 사진 없던 디시 카드에 원글 사진을 채운�
     has[0].components.splice(2, 0, { type: 12, items: [] });
     assert.equal(await backfillCardImage(has), null);
 });
+
+test('자동짤방 방지: 같은 작성자가 같은 사진을 또 올리면 사진 없이 올리고, 제외 목록 작성자는 처음부터 사진 없이 올린다', async () => {
+    const titles = ['첫째 점검 예고 안내문', '둘째 패치노트 공개합니다', '셋째 이벤트 일정 발표', '넷째 서버 이전 공지', '다섯째 신규 몬스터 소개', '여섯째 콜라보 확정'];
+    const posts = [   // [작성자, 사진키]
+        ['u:a', 'img1'],    // 처음 보는 조합 → 사진 붙음
+        ['u:a', 'img1'],    // 같은 작성자·같은 사진 → 사진 없음
+        ['u:a', 'img2'],    // 같은 작성자·다른 사진 → 사진 붙음
+        ['u:b', 'img1'],    // 다른 작성자·같은 사진 → 사진 붙음
+        ['u:spam', 'img9'], // 제외 목록 작성자 → 사진 없음
+        ['u:c', 'img3'],    // 새 조합 → 사진 붙음
+    ];
+    const lists = [[entry('0', '기존 글')]];
+    posts.forEach((_, i) => lists.push([entry('0', '기존 글'), ...titles.slice(0, i + 1).map((t, j) => entry(String(j + 1), t))]));
+    const decide = e => {
+        const [author, key] = posts[Number(e.key) - 1];
+        return { include: true, kind: p.GENERAL_KIND, author, image: { url: `https://img/${key}`, key } };
+    };
+    const src = fakeSource('dc', lists, decide);
+    const got = [];
+    const store = { data: { noImage: ['u:spam'] }, save() {} };
+    const w = createWatcher({ sources: [src], store, send: async (s, e, v) => { got.push([e.title, !!v.image]); } });
+    for (let i = 0; i <= posts.length; i++) await w.checkSource(src);
+    assert.deepEqual(got.map(g => g[1]), [true, false, true, true, false, true], JSON.stringify(got));
+    // 기록은 작성자|사진키 로 남는다(제외 작성자의 사진도 기록됨)
+    assert.ok(store.data.dcImages['u:a|img1'] && store.data.dcImages['u:a|img2'] && store.data.dcImages['u:b|img1']);
+});
