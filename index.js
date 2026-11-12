@@ -6,7 +6,7 @@ const path = require('path');
 const token = process.env.DISCORD_TOKEN;
 const { Agent, request } = require('undici');
 const { flushAll, createStore } = require('./store');
-const { startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, sendCustomNews, NEWS_CHANNEL_ID, buildSources, previewSamples, previewRecent, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID } = require('./news/watcher');
+const { startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, sendCustomNews, stripThumbnailSections, NEWS_CHANNEL_ID, buildSources, previewSamples, previewRecent, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID } = require('./news/watcher');
 const { decideAccess, canToggleLock } = require('./card-lock');
 
 // 디스코드 API 연결을 60초까지 유지한다. 기본값(약 4초)이면 잠깐만 안 써도 연결이 끊겨서
@@ -563,6 +563,7 @@ function buildAdminPanel(guildId) {
         new ButtonBuilder().setCustomId('admin_refresh').setLabel('새로고침').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('admin_custom').setLabel('소식 추가').setEmoji('📝').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('admin_delete').setLabel('소식 삭제').setEmoji('🗑️').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('admin_modernize').setLabel('카드 최신화').setEmoji('✨').setStyle(ButtonStyle.Secondary),
         // 테스트 버튼은 테스트 서버에서만 보인다
         ...(guildId === NEWS_TEST_GUILD_ID ? [new ButtonBuilder().setCustomId('admin_test').setLabel('테스트').setEmoji('🧪').setStyle(ButtonStyle.Secondary)] : []),
     ));
@@ -666,6 +667,28 @@ async function handleAdminInteraction(interaction) {
         adminStore.save();
         console.log(`[소식] ${adminStore.data.newsPaused ? '일시정지' : '재개'} (by ${interaction.user.tag})`);
         return interaction.update({ components: buildAdminPanel(interaction.guildId).components });
+    }
+    // 카드 최신화: 소식 채널의 예전 카드(오른쪽 아이콘이 붙은 것)를 지금 모양으로 고친다. 이미 고쳐진 카드는 건너뛴다.
+    if (interaction.customId === 'admin_modernize') {
+        await interaction.deferReply({ flags: V2_EPHEMERAL });
+        const finish = t => interaction.editReply({ components: adminNotice(t).components }).catch(() => {});
+        try {
+            const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
+            const messages = await channel.messages.fetch({ limit: 100 });
+            let fixed = 0, skipped = 0, failed = 0;
+            for (const m of messages.values()) {
+                if (m.author.id !== client.user.id) continue;
+                const next = stripThumbnailSections((m.components ?? []).map(c => c.toJSON ? c.toJSON() : c));
+                if (!next) { skipped++; continue; }
+                try { await m.edit({ components: next, flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } }); fixed++; }
+                catch (e) { failed++; console.error(`[소식] 카드 최신화 실패(${m.id}):`, e.message); }
+            }
+            console.log(`[소식] 카드 최신화 — 고침 ${fixed}, 건너뜀 ${skipped}, 실패 ${failed} (by ${interaction.user.tag})`);
+            await finish(`✨ 카드 최신화: ${fixed}개 고침 · ${skipped}개는 이미 최신 · 실패 ${failed}개 (최근 100개 메시지 기준)`);
+        } catch (e) {
+            await finish(`실패: ${e.message}`);
+        }
+        return;
     }
     if (interaction.customId === 'admin_refresh') return interaction.update({ components: buildAdminPanel(interaction.guildId).components });
     // 잘못 올라온 소식 삭제: 목록에서 고르고 → 확인 → 채널에서 메시지를 지운다

@@ -363,3 +363,17 @@ test('개념글 점수: 이유가 함께 나오고 기준 점수는 2점', () =>
     assert.ok(r.reasons.some(x => x.includes('점검')));
     assert.equal(p.PASS_SCORE, 2);
 });
+
+test('예전 카드(오른쪽 썸네일 섹션)를 글만 있는 카드로 고친다', () => {
+    const { stripThumbnailSections } = require('../news/watcher');
+    const old = [{ type: 17, accent_color: 1, components: [
+        { type: 9, components: [{ type: 10, content: '-# 패치노트 · 공식' }, { type: 10, content: '### 제목' }], accessory: { type: 11, media: { url: 'https://cdn.discordapp.com/emojis/1.png' } } },
+        { type: 12, items: [{ media: { url: 'https://cdn.discordapp.com/attachments/1/2/pic.png?ex=a&is=b&hm=c' } }] },
+        { type: 1, components: [{ type: 2, style: 5, label: '🔗 내용 보기', url: 'https://x' }] },
+    ] }];
+    const fixed = stripThumbnailSections(old);
+    assert.deepEqual(fixed[0].components.map(c => c.type), [10, 10, 12, 1]);
+    assert.equal(fixed[0].components[2].items[0].media.url, 'attachment://pic.png');
+    // 이미 최신인 카드는 건드리지 않는다
+    assert.equal(stripThumbnailSections(fixed), null);
+});

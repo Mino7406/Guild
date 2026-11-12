@@ -251,6 +251,35 @@ function buildPayload(source, entry, verdict, emojiIds = {}) {
     return { components: [container], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
 }
 
+// 예전 카드(오른쪽 썸네일 섹션이 있는 것)를 지금 모양(글만)으로 바꾼다. 이미 올라간 메시지의 components JSON 을 받아
+// 새 JSON 을 돌려주고, 바꿀 게 없으면 null. 사진은 첨부파일이 그대로 남으므로 attachment:// 로 다시 가리킨다.
+function stripThumbnailSections(json) {
+    const top = Array.isArray(json) ? json : [];
+    let changed = false;
+    const fixContainer = c => {
+        if (c?.type !== 17) return c;
+        const comps = [];
+        for (const x of c.components ?? []) {
+            if (x?.type === 9 && x.accessory?.type === 11) {   // 섹션 + 썸네일 → 글 칸만
+                changed = true;
+                comps.push(...(x.components ?? []));
+            } else comps.push(x);
+        }
+        return { ...c, components: comps };
+    };
+    const fixed = top.map(fixContainer);
+    if (!changed) return null;
+    const own = /^https:\/\/(?:cdn|media)\.discordapp\.(?:com|net)\/attachments\/\d+\/\d+\/([^?#/]+)/;
+    for (const c of fixed) for (const x of c.components ?? []) {
+        if (x?.type !== 12) continue;
+        for (const it of x.items ?? []) {
+            const m = own.exec(it.media?.url ?? '');
+            if (m) it.media = { url: `attachment://${decodeURIComponent(m[1])}` };
+        }
+    }
+    return fixed;
+}
+
 // ── 감시 ───────────────────────────────────────────────────────
 // deps: sources, store({ data, save() }), send(source, entry, verdict), now(), logFail(source, err), logInfo(msg) — 테스트에서 바꿔 끼운다.
 function createWatcher({ sources, store, send, update, now = Date.now, logFail = () => {}, logInfo = () => {} }) {
@@ -704,6 +733,6 @@ async function previewSamples({ sources, post, edit, emojiIds = {}, wait = ms =>
 }
 
 module.exports = {
-    startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, sendCustomNews, createWatcher, buildSources, buildPayload, NEWS_CHANNEL_ID, EMOJI_NAMES, EmptyListError,
+    startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, sendCustomNews, createWatcher, buildSources, buildPayload, stripThumbnailSections, NEWS_CHANNEL_ID, EMOJI_NAMES, EmptyListError,
     collectRecent, previewRecent, previewSamples, buildSamples, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID,
 };
