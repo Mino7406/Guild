@@ -562,8 +562,8 @@ function buildAdminPanel(guildId, note = '') {
     container.addActionRowComponents(new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('admin_refresh').setLabel('새로고침').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('admin_custom').setLabel('소식 추가').setEmoji('📝').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('admin_delete').setLabel('소식 삭제').setEmoji('🗑️').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('admin_edit').setLabel('소식 편집').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('admin_delete').setLabel('소식 삭제').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('admin_edit').setLabel('소식 편집').setEmoji('✏️').setStyle(ButtonStyle.Success),
         // 테스트 버튼은 테스트 서버에서만 보인다
         ...(guildId === NEWS_TEST_GUILD_ID ? [new ButtonBuilder().setCustomId('admin_test').setLabel('테스트').setEmoji('🧪').setStyle(ButtonStyle.Secondary)] : []),
     ));
