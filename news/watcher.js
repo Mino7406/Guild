@@ -256,6 +256,8 @@ function buildPayload(source, entry, verdict, emojiIds = {}) {
 function stripThumbnailSections(json) {
     const top = Array.isArray(json) ? json : [];
     let changed = false;
+    // 맨 윗줄 '-# 종류 · 출처' 의 출처 이름으로 지금의 출처별 띠 색을 찾는다(예전 카드는 전부 공식 주황색이었다)
+    const accentOf = label => /Update Information/.test(label) ? ACCENTS.official : /시리즈 갤러리/.test(label) ? ACCENTS.dc : /REFramework/.test(label) ? ACCENTS.reframework : /유튜브/.test(label) ? ACCENTS.youtube : null;
     const fixContainer = c => {
         if (c?.type !== 17) return c;
         const comps = [];
@@ -265,7 +267,10 @@ function stripThumbnailSections(json) {
                 comps.push(...(x.components ?? []));
             } else comps.push(x);
         }
-        return { ...c, components: comps };
+        const head = comps.find(x => x?.type === 10 && x.content?.startsWith('-# '))?.content ?? '';
+        const color = accentOf(head.split(' · ').slice(1).join(' · '));
+        if (color != null && c.accent_color !== color) changed = true;
+        return { ...c, components: comps, ...(color != null ? { accent_color: color } : {}) };
     };
     const fixed = top.map(fixContainer);
     if (!changed) return null;

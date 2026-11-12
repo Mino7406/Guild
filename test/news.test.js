@@ -377,3 +377,11 @@ test('예전 카드(오른쪽 썸네일 섹션)를 글만 있는 카드로 고�
     // 이미 최신인 카드는 건드리지 않는다
     assert.equal(stripThumbnailSections(fixed), null);
 });
+
+test('카드 최신화: 예전 주황 띠도 출처별 색으로 바꾸고, 이미 맞으면 건드리지 않는다', () => {
+    const { stripThumbnailSections } = require('../news/watcher');
+    const card = (label, color) => [{ type: 17, accent_color: color, components: [{ type: 10, content: `-# 점검 예고 · ${label}` }, { type: 10, content: '### 제목' }] }];
+    assert.equal(stripThumbnailSections(card('몬스터헌터 시리즈 갤러리 ⓜ', 0xd9822b))[0].accent_color, 0x3b4890);
+    assert.equal(stripThumbnailSections(card('Update Information', 0xd9822b)), null);
+    assert.equal(stripThumbnailSections(card('몬스터헌터 시리즈 갤러리 ⓜ', 0x3b4890)), null);
+});
