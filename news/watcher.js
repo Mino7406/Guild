@@ -285,6 +285,28 @@ function stripThumbnailSections(json) {
     return fixed;
 }
 
+// 사진 없이 올라간 예전 디시 카드에 원글의 첫 사진을 채운다(사진 기능이 생기기 전에 올라간 카드용).
+// 카드 JSON 을 받아 { components, files } 를 돌려주고, 채울 게 없으면 null. 사진이 없는 글·자동짤방 작성자·내려받기 실패도 null.
+async function backfillCardImage(json) {
+    const c = Array.isArray(json) ? json[0] : null;
+    if (c?.type !== 17 || c.components.some(x => x?.type === 12)) return null;
+    const head = c.components.find(x => x?.type === 10 && x.content?.startsWith('-# '))?.content ?? '';
+    if (!/시리즈 갤러리/.test(head)) return null;
+    const row = c.components.find(x => x?.type === 1);
+    const url = row?.components?.find(b => b?.url)?.url ?? '';
+    if (!/^https:\/\/gall\.dcinside\.com\/.*[?&]no=\d+/.test(url)) return null;
+    try {
+        const { image, author } = imageOf(await fetchText(url, { Referer: 'https://gall.dcinside.com/' }));
+        if (!image || currentWatcher?.isNoImage(author)) return null;
+        const img = await downloadImage(image.url);
+        const title = (c.components.find(x => x?.type === 10 && x.content?.startsWith('### '))?.content ?? '').slice(4, 104);
+        const gallery = { type: 12, items: [{ media: { url: `attachment://${img.name}` }, description: title || undefined }] };
+        const at = row ? c.components.indexOf(row) : c.components.length;
+        const components = [{ ...c, components: [...c.components.slice(0, at), gallery, ...c.components.slice(at)] }];
+        return { components, files: [new AttachmentBuilder(img.buf, { name: img.name })] };
+    } catch { return null; }
+}
+
 // ── 감시 ───────────────────────────────────────────────────────
 // deps: sources, store({ data, save() }), send(source, entry, verdict), now(), logFail(source, err), logInfo(msg) — 테스트에서 바꿔 끼운다.
 function createWatcher({ sources, store, send, update, now = Date.now, logFail = () => {}, logInfo = () => {} }) {
@@ -500,7 +522,7 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
         state.stats.days[d] = (state.stats.days[d] ?? 0) + 1;
         store.save();
     }
-    return { checkSource, tick, status, posts, forget, recordPost };
+    return { checkSource, tick, status, posts, forget, recordPost, isNoImage: a => (state.noImage ?? []).includes(a) };
 }
 
 // 같은 오류가 계속 나도 로그를 도배하지 않게 출처별로 1시간에 한 번만 남긴다.
@@ -738,6 +760,6 @@ async function previewSamples({ sources, post, edit, emojiIds = {}, wait = ms =>
 }
 
 module.exports = {
-    startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, sendCustomNews, createWatcher, buildSources, buildPayload, stripThumbnailSections, NEWS_CHANNEL_ID, EMOJI_NAMES, EmptyListError,
+    startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, sendCustomNews, createWatcher, buildSources, buildPayload, stripThumbnailSections, backfillCardImage, NEWS_CHANNEL_ID, EMOJI_NAMES, EmptyListError,
     collectRecent, previewRecent, previewSamples, buildSamples, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID,
 };

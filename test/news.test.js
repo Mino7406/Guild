@@ -385,3 +385,15 @@ test('카드 최신화: 예전 주황 띠도 출처별 색으로 바꾸고, 이�
     assert.equal(stripThumbnailSections(card('Update Information', 0xd9822b)), null);
     assert.equal(stripThumbnailSections(card('몬스터헌터 시리즈 갤러리 ⓜ', 0x3b4890)), null);
 });
+
+test('카드 최신화: 사진 없던 디시 카드에 원글 사진을 채운다(채울 게 없으면 null)', async () => {
+    const { backfillCardImage } = require('../news/watcher');
+    const card = (label, url) => [{ type: 17, accent_color: 1, components: [{ type: 10, content: `-# 점검 예고 · ${label}` }, { type: 10, content: '### 제목' }, { type: 1, components: [{ type: 2, style: 5, label: '내용 보기', url }] }] }];
+    // 디시 글이 아니거나 공식 카드면 건드리지 않는다(네트워크도 쓰지 않는다)
+    assert.equal(await backfillCardImage(card('Update Information', 'https://info.monsterhunter.com/x')), null);
+    assert.equal(await backfillCardImage(card('몬스터헌터 시리즈 갤러리 ⓜ', 'https://example.com/x')), null);
+    // 이미 사진이 있으면 그대로 둔다
+    const has = card('몬스터헌터 시리즈 갤러리 ⓜ', 'https://gall.dcinside.com/mgallery/board/view/?id=capcommh&no=1');
+    has[0].components.splice(2, 0, { type: 12, items: [] });
+    assert.equal(await backfillCardImage(has), null);
+});

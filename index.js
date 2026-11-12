@@ -6,7 +6,7 @@ const path = require('path');
 const token = process.env.DISCORD_TOKEN;
 const { Agent, request } = require('undici');
 const { flushAll, createStore } = require('./store');
-const { startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, sendCustomNews, stripThumbnailSections, NEWS_CHANNEL_ID, buildSources, previewSamples, previewRecent, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID } = require('./news/watcher');
+const { startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, sendCustomNews, stripThumbnailSections, backfillCardImage, NEWS_CHANNEL_ID, buildSources, previewSamples, previewRecent, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID } = require('./news/watcher');
 const { decideAccess, canToggleLock } = require('./card-lock');
 
 // 디스코드 API 연결을 60초까지 유지한다. 기본값(약 4초)이면 잠깐만 안 써도 연결이 끊겨서
@@ -675,16 +675,19 @@ async function handleAdminInteraction(interaction) {
         try {
             const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
             const messages = await channel.messages.fetch({ limit: 100 });
-            let fixed = 0, skipped = 0, failed = 0;
+            let fixed = 0, skipped = 0, failed = 0, pictured = 0;
             for (const m of messages.values()) {
                 if (m.author.id !== client.user.id) continue;
-                const next = stripThumbnailSections((m.components ?? []).map(c => c.toJSON ? c.toJSON() : c));
+                const json = (m.components ?? []).map(c => c.toJSON ? c.toJSON() : c);
+                const stripped = stripThumbnailSections(json);
+                const filled = await backfillCardImage(stripped ?? json);   // 사진 없이 올라간 예전 디시 카드는 원글 사진을 채운다
+                const next = filled?.components ?? stripped;
                 if (!next) { skipped++; continue; }
-                try { await m.edit({ components: next, flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } }); fixed++; }
+                try { await m.edit({ components: next, ...(filled ? { files: filled.files } : {}), flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } }); fixed++; if (filled) pictured++; }
                 catch (e) { failed++; console.error(`[소식] 카드 최신화 실패(${m.id}):`, e.message); }
             }
-            console.log(`[소식] 카드 최신화 — 고침 ${fixed}, 건너뜀 ${skipped}, 실패 ${failed} (by ${interaction.user.tag})`);
-            await finish(`✨ 카드 최신화: ${fixed}개 고침 · ${skipped}개는 이미 최신 · 실패 ${failed}개 (최근 100개 메시지 기준)`);
+            console.log(`[소식] 카드 최신화 — 고침 ${fixed}(사진 채움 ${pictured}), 건너뜀 ${skipped}, 실패 ${failed} (by ${interaction.user.tag})`);
+            await finish(`✨ 카드 최신화: ${fixed}개 고침(사진 채움 ${pictured}개) · ${skipped}개는 이미 최신 · 실패 ${failed}개 (최근 100개 메시지 기준)`);
         } catch (e) {
             await finish(`실패: ${e.message}`);
         }
