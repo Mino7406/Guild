@@ -6,7 +6,7 @@ const path = require('path');
 const token = process.env.DISCORD_TOKEN;
 const { Agent, request } = require('undici');
 const { flushAll, createStore } = require('./store');
-const { startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, sendCustomNews, stripThumbnailSections, backfillCardImage, cardPostUrl, setCardImage, fetchPostImages, downloadImage, blockImageAuthor, NEWS_CHANNEL_ID, buildSources, previewSamples, previewRecent, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID } = require('./news/watcher');
+const { startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, sendCustomNews, stripThumbnailSections, backfillCardImage, cardPostUrl, setCardImage, getCardFields, setCardText, fetchPostImages, downloadImage, blockImageAuthor, NEWS_CHANNEL_ID, buildSources, previewSamples, previewRecent, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID } = require('./news/watcher');
 const { decideAccess, canToggleLock } = require('./card-lock');
 
 // 디스코드 API 연결을 60초까지 유지한다. 기본값(약 4초)이면 잠깐만 안 써도 연결이 끊겨서
@@ -544,12 +544,12 @@ function sourceStatusLine(s) {
     return s.okAt ? `✅ **${s.label}** — ${t(s.okAt)}` : `⏳ **${s.label}** — 아직 확인 전`;
 }
 
-function buildAdminPanel(guildId) {
+function buildAdminPanel(guildId, note = '') {
     const paused = isNewsPaused();
     const status = getNewsStatus();
     const text = s => new TextDisplayBuilder().setContent(s);
     const container = new ContainerBuilder().setAccentColor(paused ? 0xED4245 : 0x57F287);
-    container.addTextDisplayComponents(text('## 🛠️ 길드봇 관리'));
+    container.addTextDisplayComponents(text(`## 🛠️ 길드봇 관리${note ? `\n-# ${note}` : ''}`));
     // 소식 상태 줄 + 오른쪽에 일시정지/재개 버튼
     container.addSectionComponents(new SectionBuilder()
         .addTextDisplayComponents(text(`**소식 알림**\n${paused ? '⏸️ 일시정지 중' : '▶️ 작동 중'}${status ? ` · 오늘 ${status.today}개 올림` : ''}`))
@@ -563,12 +563,9 @@ function buildAdminPanel(guildId) {
         new ButtonBuilder().setCustomId('admin_refresh').setLabel('새로고침').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('admin_custom').setLabel('소식 추가').setEmoji('📝').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('admin_delete').setLabel('소식 삭제').setEmoji('🗑️').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('admin_modernize').setLabel('카드 최신화').setEmoji('✨').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('admin_edit').setLabel('소식 편집').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
         // 테스트 버튼은 테스트 서버에서만 보인다
         ...(guildId === NEWS_TEST_GUILD_ID ? [new ButtonBuilder().setCustomId('admin_test').setLabel('테스트').setEmoji('🧪').setStyle(ButtonStyle.Secondary)] : []),
-    ));
-    container.addActionRowComponents(new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('admin_photo').setLabel('사진 바꾸기').setEmoji('🖼️').setStyle(ButtonStyle.Secondary),
     ));
     return { components: [container], flags: V2_EPHEMERAL };
 }
@@ -626,6 +623,32 @@ async function fetchRecentNewsPosts(limit = 10) {
     }
 }
 
+// 소식 채널의 예전 카드(오른쪽 아이콘·옛 띠 색)를 지금 모양으로 고친다. 사진 없는 디시 카드는 원글 사진을 채우되,
+// 디시에 요청이 몰리지 않게 한 번 시도한 카드는 봇이 켜져 있는 동안 다시 시도하지 않고, 한 번에 3장까지만 채운다.
+const photoTried = new Set();
+async function modernizeCards() {
+    const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
+    const messages = await channel.messages.fetch({ limit: 100 });
+    const r = { fixed: 0, skipped: 0, failed: 0, pictured: 0 };
+    let fills = 0;
+    for (const m of messages.values()) {
+        if (m.author.id !== client.user.id) continue;
+        const json = cardJson(m);
+        const stripped = stripThumbnailSections(json);
+        let filled = null;
+        if (fills < 3 && !photoTried.has(m.id) && cardPostUrl(stripped ?? json)) {
+            photoTried.add(m.id);
+            filled = await backfillCardImage(stripped ?? json);
+            fills++;
+        }
+        const next = filled?.components ?? stripped;
+        if (!next) { r.skipped++; continue; }
+        try { await m.edit({ components: next, ...(filled ? { files: filled.files } : {}), flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } }); r.fixed++; if (filled) r.pictured++; }
+        catch (e) { r.failed++; console.error(`[소식] 카드 최신화 실패(${m.id}):`, e.message); }
+    }
+    return r;
+}
+
 // ── 사진 바꾸기: 자동으로 올라간 디시 카드의 큰 사진을 관리자가 직접 고른다(교체·빼기·작성자 제외) ──
 const cardJson = m => (m.components ?? []).map(c => c.toJSON ? c.toJSON() : c);
 // 고르는 화면 하나만 기억한다(받아 둔 사진 포함, 15분). 메모리를 아끼려고 후보는 최대 6장·합계 20MB.
@@ -635,13 +658,13 @@ const PHOTO_TOTAL_MAX = 20 * 1024 * 1024;
 const PHOTO_MENU = (customId, placeholder, options) => new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder().setCustomId(customId).setPlaceholder(placeholder).addOptions(options));
 
-async function buildPhotoCardList() {
+async function buildEditCardList() {
     const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
     const messages = await channel.messages.fetch({ limit: 100 });
-    const cards = [...messages.values()].filter(m => m.author.id === client.user.id && cardPostUrl(cardJson(m)))
+    const cards = [...messages.values()].filter(m => m.author.id === client.user.id && cardJson(m)[0]?.type === 17)
         .sort((x, y) => y.createdTimestamp - x.createdTimestamp).slice(0, 10).map(describeNewsMessage);
-    if (!cards.length) return adminNotice('사진을 바꿀 수 있는 최근 디시 카드가 없습니다.');
-    return adminNotice('사진을 바꿀 카드를 고르세요. (디시 글로 올라간 최근 카드 10개)', [PHOTO_MENU('admin_photopick', '최근 디시 카드',
+    if (!cards.length) return adminNotice('편집할 수 있는 최근 소식이 없습니다.');
+    return adminNotice('편집할 소식을 고르세요. (길드 봇이 올린 최근 소식 10개)', [PHOTO_MENU('admin_editpick', '최근 올라온 소식',
         cards.map(p => ({ label: p.title.slice(0, 100) || '(제목 없음)', description: `${p.label} · ${new Date(p.at + 9 * 3600_000).toISOString().slice(5, 16).replace('T', ' ')}`.slice(0, 100), value: p.id })))]);
 }
 
@@ -720,54 +743,79 @@ async function handleAdminInteraction(interaction) {
         console.log(`[소식] ${adminStore.data.newsPaused ? '일시정지' : '재개'} (by ${interaction.user.tag})`);
         return interaction.update({ components: buildAdminPanel(interaction.guildId).components });
     }
-    // 카드 최신화: 소식 채널의 예전 카드(오른쪽 아이콘이 붙은 것)를 지금 모양으로 고친다. 이미 고쳐진 카드는 건너뛴다.
-    if (interaction.customId === 'admin_modernize') {
+    // 소식 편집: 카드 고르기 → (제목·내용·링크·사진 주소 수정 | 디시 원글 사진 고르기)
+    if (interaction.customId === 'admin_edit') {
         await interaction.deferReply({ flags: V2_EPHEMERAL });
-        // 결과 표시가 실패하면 원인을 로그에 남기고, 로딩이 멈추지 않는 일이 없게 새 메시지로 한 번 더 알린다
-        const finish = async t => {
-            try { await interaction.editReply({ components: adminNotice(t).components, flags: MessageFlags.IsComponentsV2 }); }
-            catch (e) {
-                console.error('[소식] 카드 최신화 결과 표시 실패:', e.code ?? '', e.message);
-                await interaction.followUp(adminNotice(t)).catch(e2 => console.error('[소식] 카드 최신화 결과 안내도 실패:', e2.message));
-            }
-        };
-        try {
-            const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
-            const messages = await channel.messages.fetch({ limit: 100 });
-            let fixed = 0, skipped = 0, failed = 0, pictured = 0;
-            for (const m of messages.values()) {
-                if (m.author.id !== client.user.id) continue;
-                const json = (m.components ?? []).map(c => c.toJSON ? c.toJSON() : c);
-                const stripped = stripThumbnailSections(json);
-                const filled = await backfillCardImage(stripped ?? json);   // 사진 없이 올라간 예전 디시 카드는 원글 사진을 채운다
-                const next = filled?.components ?? stripped;
-                if (!next) { skipped++; continue; }
-                try { await m.edit({ components: next, ...(filled ? { files: filled.files } : {}), flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } }); fixed++; if (filled) pictured++; }
-                catch (e) { failed++; console.error(`[소식] 카드 최신화 실패(${m.id}):`, e.message); }
-            }
-            console.log(`[소식] 카드 최신화 — 고침 ${fixed}(사진 채움 ${pictured}), 건너뜀 ${skipped}, 실패 ${failed} (by ${interaction.user.tag})`);
-            await finish(`✨ 카드 최신화: ${fixed}개 고침(사진 채움 ${pictured}개) · ${skipped}개는 이미 최신 · 실패 ${failed}개 (최근 100개 메시지 기준)`);
-        } catch (e) {
-            await finish(`실패: ${e.message}`);
-        }
-        return;
-    }
-    // 사진 바꾸기: 카드 고르기 → 사진 후보 보고 고르기 → 카드 수정
-    if (interaction.customId === 'admin_photo') {
-        await interaction.deferReply({ flags: V2_EPHEMERAL });
-        try { return await interaction.editReply({ components: (await buildPhotoCardList()).components }); }
+        try { return await interaction.editReply({ components: (await buildEditCardList()).components }); }
         catch (e) { return interaction.editReply({ components: adminNotice(`실패: ${e.message}`).components }); }
     }
-    if (interaction.customId === 'admin_photopick') {
+    if (interaction.customId === 'admin_editpick') {
+        const id = interaction.values[0];
+        let m = null;
+        try { m = await (await client.channels.fetch(NEWS_CHANNEL_ID)).messages.fetch(id); } catch { /* 이미 지워짐 */ }
+        if (!m || m.author.id !== client.user.id || cardJson(m)[0]?.type !== 17) return edit('이미 지워졌거나 편집할 수 없는 소식입니다.');
+        const buttons = [new ButtonBuilder().setCustomId(`admin_editfields_${id}`).setLabel('제목·내용·링크·사진').setEmoji('✏️').setStyle(ButtonStyle.Primary)];
+        if (cardPostUrl(cardJson(m))) buttons.push(new ButtonBuilder().setCustomId(`admin_editphoto_${id}`).setLabel('원글 사진 고르기').setEmoji('🖼️').setStyle(ButtonStyle.Secondary));
+        buttons.push(new ButtonBuilder().setCustomId('admin_delcancel').setLabel('취소').setStyle(ButtonStyle.Secondary));
+        return edit(`무엇을 편집할까요?\n**${describeNewsMessage(m).title}**`, [new ActionRowBuilder().addComponents(...buttons)]);
+    }
+    if (interaction.customId.startsWith('admin_editfields_')) {
+        const id = interaction.customId.slice('admin_editfields_'.length);
+        let f = null;
+        try { const m = await (await client.channels.fetch(NEWS_CHANNEL_ID)).messages.fetch(id); f = m.author.id === client.user.id ? getCardFields(cardJson(m)) : null; } catch { /* 이미 지워짐 */ }
+        if (!f) return edit('이미 지워졌거나 편집할 수 없는 소식입니다.');
+        const field = (cid, label, style, required, max, value, placeholder) => {
+            const t = new TextInputBuilder().setCustomId(cid).setLabel(label).setStyle(style).setRequired(required).setMaxLength(max);
+            if (value) t.setValue(String(value).slice(0, max));
+            if (placeholder) t.setPlaceholder(placeholder);
+            return new ActionRowBuilder().addComponents(t);
+        };
+        return interaction.showModal(new ModalBuilder().setCustomId(`admin_editsubmit_${id}`).setTitle('소식 편집 — 제출하면 바로 고쳐져요').addComponents(
+            field('title', '제목', TextInputStyle.Short, true, 200, f.title),
+            field('body', '내용 (비우면 내용 칸을 뺍니다)', TextInputStyle.Paragraph, false, 3000, f.body),
+            field('url', '링크 (버튼 주소)', TextInputStyle.Short, false, 500, f.url, 'https://…'),
+            field('image', '사진 (비우면 그대로)', TextInputStyle.Short, false, 500, '', '이미지 주소 https://… 또는 "없음"(사진 빼기)'),
+        ));
+    }
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('admin_editsubmit_')) {
+        await interaction.deferReply({ flags: V2_EPHEMERAL });
+        const done = t => interaction.editReply({ components: adminNotice(t).components });
+        try {
+            const id = interaction.customId.slice('admin_editsubmit_'.length);
+            const m = await (await client.channels.fetch(NEWS_CHANNEL_ID)).messages.fetch(id);
+            if (m.author.id !== client.user.id || cardJson(m)[0]?.type !== 17) return done('길드 봇이 올린 카드만 고칠 수 있어요.');
+            const get = k => interaction.fields.getTextInputValue(k).trim();
+            const url = get('url');
+            if (url && !/^https?:\/\/\S+$/.test(url)) return done('링크는 http:// 또는 https:// 로 시작하는 주소여야 합니다. 다시 시도해 주세요.');
+            let components = setCardText(cardJson(m), { title: get('title'), body: get('body'), url });
+            let files = [];
+            const image = get('image');
+            if (image === '없음') components = setCardImage(components, null);
+            else if (image) {
+                if (!/^https?:\/\/\S+$/.test(image)) return done('사진 주소는 http:// 또는 https:// 로 시작해야 합니다(사진을 빼려면 "없음").');
+                const img = await downloadImage(image);
+                components = setCardImage(components, img.name);
+                files = [new AttachmentBuilder(img.buf, { name: img.name })];
+            }
+            // 사진을 건드리지 않았으면 기존 첨부를 그대로 둔다(attachments 를 보내지 않음)
+            await m.edit({ components, ...(image ? { files, attachments: [] } : {}), flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } });
+            console.log(`[소식] 카드 편집 — ${id} (by ${interaction.user.tag})`);
+            return done(`✏️ 고쳤습니다. https://discord.com/channels/${m.guildId}/${m.channelId}/${m.id}`);
+        } catch (e) {
+            console.error('[소식] 카드 편집 실패:', e.message);
+            return done(`실패: ${e.message}`);
+        }
+    }
+    if (interaction.customId.startsWith('admin_editphoto_')) {
         await interaction.deferUpdate();
-        try { const v = await buildPhotoChoices(interaction.values[0]); return await interaction.editReply({ components: v.components, ...(v.files ? { files: v.files } : {}) }); }
+        try { const v = await buildPhotoChoices(interaction.customId.slice('admin_editphoto_'.length)); return await interaction.editReply({ components: v.components, ...(v.files ? { files: v.files } : {}) }); }
         catch (e) { console.error('[소식] 사진 후보 불러오기 실패:', e.message); return interaction.editReply({ components: adminNotice(`사진 후보를 불러오지 못했습니다: ${e.message}`).components, attachments: [] }); }
     }
     if (interaction.customId === 'admin_photoset') {
         await interaction.deferUpdate();
         const done = t => interaction.editReply({ components: adminNotice(t).components, attachments: [] });
         const sess = photoSession;
-        if (!sess || Date.now() - sess.at > PHOTO_SESSION_MS) { photoSession = null; return done('시간이 지났습니다. 다시 `사진 바꾸기`를 눌러 주세요.'); }
+        if (!sess || Date.now() - sess.at > PHOTO_SESSION_MS) { photoSession = null; return done('시간이 지났습니다. `소식 편집`에서 다시 시작해 주세요.'); }
         try {
             const choice = interaction.values[0];
             const target = await (await client.channels.fetch(NEWS_CHANNEL_ID)).messages.fetch(sess.msgId);
@@ -785,7 +833,17 @@ async function handleAdminInteraction(interaction) {
             return done(`실패: ${e.message}`);
         }
     }
-    if (interaction.customId === 'admin_refresh') return interaction.update({ components: buildAdminPanel(interaction.guildId).components });
+    // 새로고침: 패널을 새로 그리면서 소식 채널의 예전 카드도 지금 모양으로 고친다(이미 최신인 카드는 건드리지 않음)
+    if (interaction.customId === 'admin_refresh') {
+        await interaction.deferUpdate();
+        let note = '';
+        try {
+            const r = await modernizeCards();
+            if (r.fixed || r.failed) note = `✨ 카드 ${r.fixed}개 최신화${r.pictured ? `(사진 채움 ${r.pictured})` : ''}${r.failed ? ` · 실패 ${r.failed}` : ''}`;
+            console.log(`[소식] 새로고침 카드 최신화 — 고침 ${r.fixed}(사진 채움 ${r.pictured}), 건너뜀 ${r.skipped}, 실패 ${r.failed} (by ${interaction.user.tag})`);
+        } catch (e) { console.error('[소식] 카드 최신화 실패:', e.message); note = `카드 최신화 실패: ${e.message}`; }
+        return interaction.editReply({ components: buildAdminPanel(interaction.guildId, note).components });
+    }
     // 잘못 올라온 소식 삭제: 목록에서 고르고 → 확인 → 채널에서 메시지를 지운다
     if (interaction.customId === 'admin_delete') {
         await interaction.deferReply({ flags: V2_EPHEMERAL });   // 채널 기록을 읽는 동안 3초 제한에 걸리지 않게

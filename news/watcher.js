@@ -327,6 +327,40 @@ function setCardImage(json, name) {
     const at = row ? rest.indexOf(row) : rest.length;
     return [{ ...c, components: [...rest.slice(0, at), gallery, ...rest.slice(at)] }];
 }
+// 카드의 제목·내용·링크를 읽는다(편집 창에 미리 채워 넣는 값). 내용 = 맨 윗줄(-#)·제목(###)이 아닌 첫 글 칸, 소식 날짜·메모 줄(-#)은 그대로 둔다.
+function getCardFields(json) {
+    const c = Array.isArray(json) ? json[0] : null;
+    if (c?.type !== 17) return null;
+    const texts = c.components.filter(x => x?.type === 10);
+    const link = c.components.find(x => x?.type === 1)?.components?.find(b => b?.url);
+    return {
+        title: (texts.find(x => x.content?.startsWith('### '))?.content ?? '').slice(4),
+        body: texts.find(x => !x.content?.startsWith('-# ') && !x.content?.startsWith('### '))?.content ?? '',
+        url: link?.url ?? '',
+    };
+}
+// 카드의 제목·내용·링크를 바꾼 새 JSON. 값이 undefined 면 그대로 두고, 내용이 빈 문자열이면 내용 칸을 뺀다. 링크는 비우면 그대로(버튼 유지).
+function setCardText(json, { title, body, url } = {}) {
+    const c = json[0];
+    let comps = c.components.map(x => ({ ...x }));
+    if (typeof title === 'string' && title.trim()) {
+        const i = comps.findIndex(x => x.type === 10 && x.content?.startsWith('### '));
+        if (i >= 0) comps[i].content = `### ${title.trim().slice(0, 200)}`;
+    }
+    if (typeof body === 'string') {
+        const i = comps.findIndex(x => x.type === 10 && !x.content?.startsWith('-# ') && !x.content?.startsWith('### '));
+        const text = body.trim().slice(0, 3000);
+        if (i >= 0) { if (text) comps[i].content = text; else comps.splice(i, 1); }
+        else if (text) { const t = comps.findIndex(x => x.type === 10 && x.content?.startsWith('### ')); comps.splice(t + 1, 0, { type: 10, content: text }); }
+    }
+    if (typeof url === 'string' && /^https?:\/\/\S+$/.test(url.trim())) {
+        const link = url.trim();
+        const row = comps.find(x => x.type === 1);
+        if (row) row.components = row.components.map(b => b.url ? { ...b, url: link } : b);
+        else comps.push({ type: 1, components: [{ type: 2, style: 5, label: BUTTON_LABEL, url: link }] });
+    }
+    return [{ ...c, components: comps }];
+}
 // 디시 원글의 작성자와 본문 사진 후보(최대 max개). 사진은 Referer 가 있어야 받아지므로 봇이 내려받아 보여 준다.
 async function fetchPostImages(url, max = 6) {
     const { author, images } = parse.dcPostInfo(await fetchText(url, { Referer: 'https://gall.dcinside.com/' }));
@@ -787,6 +821,6 @@ async function previewSamples({ sources, post, edit, emojiIds = {}, wait = ms =>
 }
 
 module.exports = {
-    startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, sendCustomNews, createWatcher, buildSources, buildPayload, stripThumbnailSections, backfillCardImage, cardPostUrl, setCardImage, fetchPostImages, downloadImage, blockImageAuthor, NEWS_CHANNEL_ID, EMOJI_NAMES, EmptyListError,
+    startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, sendCustomNews, createWatcher, buildSources, buildPayload, stripThumbnailSections, backfillCardImage, cardPostUrl, setCardImage, getCardFields, setCardText, fetchPostImages, downloadImage, blockImageAuthor, NEWS_CHANNEL_ID, EMOJI_NAMES, EmptyListError,
     collectRecent, previewRecent, previewSamples, buildSamples, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID,
 };

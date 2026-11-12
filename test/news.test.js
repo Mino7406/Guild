@@ -461,3 +461,24 @@ test('사진 바꾸기: 작성자 제외는 앞으로의 사진을 막고 중복
     await w.checkSource(src);            // 제외한 작성자의 다음 글: 사진 없음
     assert.deepEqual(got, [true, false]);
 });
+
+test('소식 편집: 제목·내용·링크를 읽고 고친다(내용 비우기·잘못된 링크·원본 불변)', () => {
+    const { getCardFields, setCardText } = require('../news/watcher');
+    const src = buildSources({ YOUTUBE_API_KEY: 'k' }).find(s => s.id === 'official');
+    const entry = { title: '제목', url: 'https://info.monsterhunter.com/x', at: 1, kinds: [], platforms: [], summary: '' };
+    const json = buildPayload(src, entry, { include: true, kind: { label: '패치노트' }, detail: '원래 내용' }, {}).components.map(c => c.toJSON());
+    const before = JSON.stringify(json);
+    assert.deepEqual(getCardFields(json), { title: '제목', body: '원래 내용', url: 'https://info.monsterhunter.com/x' });
+    const e = getCardFields(setCardText(json, { title: ' 새 제목 ', body: '새 내용', url: 'https://example.com/y' }));
+    assert.deepEqual(e, { title: '새 제목', body: '새 내용', url: 'https://example.com/y' });
+    assert.equal(getCardFields(setCardText(json, { body: '' })).body, '');                      // 내용 칸 빼기
+    assert.equal(getCardFields(setCardText(json, { url: 'javascript:alert(1)' })).url, e.url === '' ? '' : 'https://info.monsterhunter.com/x');   // 위험한 링크는 무시
+    assert.equal(getCardFields(setCardText(json, { title: '   ' })).title, '제목');              // 빈 제목은 무시
+    // 내용 칸이 없던 카드에 내용을 넣으면 제목 바로 아래에 들어간다
+    const none = buildPayload(src, entry, { include: true, kind: { label: '패치노트' } }, {}).components.map(c => c.toJSON());
+    const added = setCardText(none, { body: '추가한 내용' })[0].components.filter(c => c.type === 10).map(c => c.content);
+    assert.deepEqual(added.slice(0, 3), ['-# 패치노트 · Update Information', `### 제목`, '추가한 내용']);
+    // 긴 내용(편집 창 한도 3000자)도 잘리지 않는다
+    assert.equal(getCardFields(setCardText(json, { body: 'ㄱ'.repeat(3000) })).body.length, 3000);
+    assert.equal(JSON.stringify(json), before);
+});
