@@ -1,12 +1,12 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Events, REST, Routes, ActionRowBuilder, ButtonBuilder, ButtonStyle, Collection, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, SectionBuilder, ThumbnailBuilder, MessageFlags, resolveColor, ActivityType, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { AttachmentBuilder, MediaGalleryBuilder, MediaGalleryItemBuilder, Client, GatewayIntentBits, Events, REST, Routes, ActionRowBuilder, ButtonBuilder, ButtonStyle, Collection, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, SectionBuilder, ThumbnailBuilder, MessageFlags, resolveColor, ActivityType, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
 const token = process.env.DISCORD_TOKEN;
 const { Agent, request } = require('undici');
 const { flushAll, createStore } = require('./store');
-const { startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, sendCustomNews, stripThumbnailSections, backfillCardImage, NEWS_CHANNEL_ID, buildSources, previewSamples, previewRecent, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID } = require('./news/watcher');
+const { startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, sendCustomNews, stripThumbnailSections, backfillCardImage, cardPostUrl, setCardImage, fetchPostImages, downloadImage, blockImageAuthor, NEWS_CHANNEL_ID, buildSources, previewSamples, previewRecent, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID } = require('./news/watcher');
 const { decideAccess, canToggleLock } = require('./card-lock');
 
 // 디스코드 API 연결을 60초까지 유지한다. 기본값(약 4초)이면 잠깐만 안 써도 연결이 끊겨서
@@ -567,6 +567,9 @@ function buildAdminPanel(guildId) {
         // 테스트 버튼은 테스트 서버에서만 보인다
         ...(guildId === NEWS_TEST_GUILD_ID ? [new ButtonBuilder().setCustomId('admin_test').setLabel('테스트').setEmoji('🧪').setStyle(ButtonStyle.Secondary)] : []),
     ));
+    container.addActionRowComponents(new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('admin_photo').setLabel('사진 바꾸기').setEmoji('🖼️').setStyle(ButtonStyle.Secondary),
+    ));
     return { components: [container], flags: V2_EPHEMERAL };
 }
 
@@ -621,6 +624,55 @@ async function fetchRecentNewsPosts(limit = 10) {
         console.error('[소식 삭제 목록] 채널 기록을 읽지 못해 저장된 기록으로 대신함:', e.message);
         return getNewsPosts().slice(0, limit);
     }
+}
+
+// ── 사진 바꾸기: 자동으로 올라간 디시 카드의 큰 사진을 관리자가 직접 고른다(교체·빼기·작성자 제외) ──
+const cardJson = m => (m.components ?? []).map(c => c.toJSON ? c.toJSON() : c);
+// 고르는 화면 하나만 기억한다(받아 둔 사진 포함, 15분). 메모리를 아끼려고 후보는 최대 6장·합계 20MB.
+let photoSession = null;   // { msgId, author, images: [{ name, buf }], at }
+const PHOTO_SESSION_MS = 15 * 60_000;
+const PHOTO_TOTAL_MAX = 20 * 1024 * 1024;
+const PHOTO_MENU = (customId, placeholder, options) => new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder().setCustomId(customId).setPlaceholder(placeholder).addOptions(options));
+
+async function buildPhotoCardList() {
+    const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
+    const messages = await channel.messages.fetch({ limit: 100 });
+    const cards = [...messages.values()].filter(m => m.author.id === client.user.id && cardPostUrl(cardJson(m)))
+        .sort((x, y) => y.createdTimestamp - x.createdTimestamp).slice(0, 10).map(describeNewsMessage);
+    if (!cards.length) return adminNotice('사진을 바꿀 수 있는 최근 디시 카드가 없습니다.');
+    return adminNotice('사진을 바꿀 카드를 고르세요. (디시 글로 올라간 최근 카드 10개)', [PHOTO_MENU('admin_photopick', '최근 디시 카드',
+        cards.map(p => ({ label: p.title.slice(0, 100) || '(제목 없음)', description: `${p.label} · ${new Date(p.at + 9 * 3600_000).toISOString().slice(5, 16).replace('T', ' ')}`.slice(0, 100), value: p.id })))]);
+}
+
+// 카드를 고르면: 원글에서 사진 후보를 받아 번호를 붙여 보여 주고, 교체할 사진·사진 빼기·작성자 제외를 고르게 한다
+async function buildPhotoChoices(msgId) {
+    const channel = await client.channels.fetch(NEWS_CHANNEL_ID);
+    const msg = await channel.messages.fetch(msgId);
+    const url = msg.author.id === client.user.id ? cardPostUrl(cardJson(msg)) : null;
+    if (!url) return adminNotice('이 카드는 사진을 바꿀 수 없습니다(디시 글 카드가 아님).');
+    const { author, images } = await fetchPostImages(url);
+    const got = []; let total = 0;
+    for (const im of images) {
+        try {
+            const d = await downloadImage(im.url);
+            if (total + d.buf.length > PHOTO_TOTAL_MAX) break;
+            total += d.buf.length;
+            got.push({ name: `p${got.length + 1}.${d.name.split('.').pop()}`, buf: d.buf });
+        } catch { /* 못 받은 사진은 후보에서 뺀다 */ }
+    }
+    photoSession = { msgId, author, images: got, at: Date.now() };
+    const container = new ContainerBuilder().setAccentColor(DEFAULT_ACCENT);
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`**${describeNewsMessage(msg).title}**
+${got.length ? '카드에 넣을 사진을 고르세요.' : '원글에서 받을 수 있는 사진이 없습니다.'} 작성자: ${author ?? '알 수 없음'}`));
+    if (got.length) container.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(...got.map((g, i) => new MediaGalleryItemBuilder().setURL(`attachment://${g.name}`).setDescription(`사진 ${i + 1}`))));
+    const options = [
+        ...got.map((g, i) => ({ label: `사진 ${i + 1} 로 바꾸기`, value: `i:${i}` })),
+        { label: '사진 빼기', value: 'none' },
+        ...(author ? [{ label: '사진 빼기 + 이 작성자는 앞으로 사진 안 붙이기', value: 'block' }] : []),
+    ];
+    container.addActionRowComponents(PHOTO_MENU('admin_photoset', '무엇으로 할까요?', options));
+    return { components: [container], files: got.map(g => new AttachmentBuilder(g.buf, { name: g.name })) };
 }
 
 // 최근에 올린 소식 10개를 고르는 메뉴
@@ -699,6 +751,39 @@ async function handleAdminInteraction(interaction) {
             await finish(`실패: ${e.message}`);
         }
         return;
+    }
+    // 사진 바꾸기: 카드 고르기 → 사진 후보 보고 고르기 → 카드 수정
+    if (interaction.customId === 'admin_photo') {
+        await interaction.deferReply({ flags: V2_EPHEMERAL });
+        try { return await interaction.editReply({ components: (await buildPhotoCardList()).components }); }
+        catch (e) { return interaction.editReply({ components: adminNotice(`실패: ${e.message}`).components }); }
+    }
+    if (interaction.customId === 'admin_photopick') {
+        await interaction.deferUpdate();
+        try { const v = await buildPhotoChoices(interaction.values[0]); return await interaction.editReply({ components: v.components, ...(v.files ? { files: v.files } : {}) }); }
+        catch (e) { console.error('[소식] 사진 후보 불러오기 실패:', e.message); return interaction.editReply({ components: adminNotice(`사진 후보를 불러오지 못했습니다: ${e.message}`).components, attachments: [] }); }
+    }
+    if (interaction.customId === 'admin_photoset') {
+        await interaction.deferUpdate();
+        const done = t => interaction.editReply({ components: adminNotice(t).components, attachments: [] });
+        const sess = photoSession;
+        if (!sess || Date.now() - sess.at > PHOTO_SESSION_MS) { photoSession = null; return done('시간이 지났습니다. 다시 `사진 바꾸기`를 눌러 주세요.'); }
+        try {
+            const choice = interaction.values[0];
+            const target = await (await client.channels.fetch(NEWS_CHANNEL_ID)).messages.fetch(sess.msgId);
+            if (target.author.id !== client.user.id) return done('길드 봇이 올린 카드만 고칠 수 있어요.');
+            const pick = choice.startsWith('i:') ? sess.images[Number(choice.slice(2))] : null;
+            if (choice.startsWith('i:') && !pick) return done('고른 사진을 찾지 못했습니다. 다시 시도해 주세요.');
+            const components = setCardImage(cardJson(target), pick?.name ?? null);
+            await target.edit({ components, files: pick ? [new AttachmentBuilder(pick.buf, { name: pick.name })] : [], attachments: [], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } });
+            if (choice === 'block') blockImageAuthor(sess.author);
+            photoSession = null;
+            console.log(`[소식] 카드 사진 ${pick ? `교체(${pick.name})` : choice === 'block' ? '빼기+작성자 제외' : '빼기'} — ${sess.msgId} 작성자 ${sess.author} (by ${interaction.user.tag})`);
+            return done(`🖼️ ${pick ? '사진을 바꿨습니다.' : choice === 'block' ? `사진을 뺐고, ${sess.author} 님의 글에는 앞으로 사진을 붙이지 않습니다.` : '사진을 뺐습니다.'} https://discord.com/channels/${target.guildId}/${target.channelId}/${target.id}`);
+        } catch (e) {
+            console.error('[소식] 사진 바꾸기 실패:', e.message);
+            return done(`실패: ${e.message}`);
+        }
     }
     if (interaction.customId === 'admin_refresh') return interaction.update({ components: buildAdminPanel(interaction.guildId).components });
     // 잘못 올라온 소식 삭제: 목록에서 고르고 → 확인 → 채널에서 메시지를 지운다

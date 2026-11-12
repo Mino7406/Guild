@@ -423,3 +423,41 @@ test('자동짤방 방지: 같은 작성자가 같은 사진을 또 올리면 �
     // 기록은 작성자|사진키 로 남는다(제외 작성자의 사진도 기록됨)
     assert.ok(store.data.dcImages['u:a|img1'] && store.data.dcImages['u:a|img2'] && store.data.dcImages['u:b|img1']);
 });
+
+test('사진 바꾸기: 디시 카드 판별·사진 교체·사진 빼기', () => {
+    const { cardPostUrl, setCardImage } = require('../news/watcher');
+    const dc = 'https://gall.dcinside.com/mgallery/board/view/?id=capcommh&no=1537009';
+    const card = (url, withImg) => [{ type: 17, accent_color: 1, components: [
+        { type: 10, content: '-# 점검 · 몬스터헌터 시리즈 갤러리 ⓜ' }, { type: 10, content: '### 제목입니다' },
+        ...(withImg ? [{ type: 12, items: [{ media: { url: 'attachment://old.png' } }] }] : []),
+        { type: 1, components: [{ type: 2, style: 5, label: '내용 보기', url }] }] }];
+    assert.equal(cardPostUrl(card(dc)), dc);
+    assert.equal(cardPostUrl(card('https://info.monsterhunter.com/x')), null);   // 공식 링크 카드는 대상이 아니다
+    // 사진 없는 카드에 넣기: 버튼 줄 앞에 들어간다
+    const added = setCardImage(card(dc, false), 'p2.jpg');
+    assert.deepEqual(added[0].components.map(c => c.type), [10, 10, 12, 1]);
+    assert.equal(added[0].components[2].items[0].media.url, 'attachment://p2.jpg');
+    assert.equal(added[0].components[2].items[0].description, '제목입니다');
+    // 있던 사진 교체: 사진 칸은 하나만 남는다
+    const swapped = setCardImage(card(dc, true), 'p1.png');
+    assert.equal(swapped[0].components.filter(c => c.type === 12).length, 1);
+    assert.equal(swapped[0].components.find(c => c.type === 12).items[0].media.url, 'attachment://p1.png');
+    // 사진 빼기, 원본은 그대로
+    const src = card(dc, true);
+    assert.deepEqual(setCardImage(src, null)[0].components.map(c => c.type), [10, 10, 1]);
+    assert.equal(src[0].components.length, 4);
+});
+
+test('사진 바꾸기: 작성자 제외는 앞으로의 사진을 막고 중복 없이 저장된다', async () => {
+    const titles = ['첫째 점검 예고 안내문', '둘째 패치노트 공개합니다'];
+    const lists = [[entry('0', '기존 글')], [entry('0', '기존 글'), entry('1', titles[0])], [entry('0', '기존 글'), entry('1', titles[0]), entry('2', titles[1])]];
+    const src = fakeSource('dc', lists, e => ({ include: true, kind: p.GENERAL_KIND, author: 'u:x', image: { url: 'https://img/' + e.key, key: 'k' + e.key } }));
+    const got = []; const store = { data: {}, save() {} };
+    const w = createWatcher({ sources: [src], store, send: async (s, e, v) => { got.push(!!v.image); } });
+    await w.checkSource(src);
+    await w.checkSource(src);            // 첫 글: 사진 붙음
+    w.blockImageAuthor('u:x'); w.blockImageAuthor('u:x');
+    assert.deepEqual(store.data.noImage, ['u:x']);
+    await w.checkSource(src);            // 제외한 작성자의 다음 글: 사진 없음
+    assert.deepEqual(got, [true, false]);
+});

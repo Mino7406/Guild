@@ -307,6 +307,32 @@ async function backfillCardImage(json) {
     } catch { return null; }
 }
 
+// ── 사진 바꾸기(관리자가 직접 고르기) ───────────────────────────────────
+const DC_POST_RE = /^https:\/\/gall\.dcinside\.com\/.*[?&]no=\d+/;
+// 카드(컨테이너) JSON 에서 디시 원글 주소(버튼)를 찾는다. 공식 링크 카드 등은 null.
+function cardPostUrl(json) {
+    const c = Array.isArray(json) ? json[0] : null;
+    if (c?.type !== 17) return null;
+    const url = c.components.find(x => x?.type === 1)?.components?.find(b => b?.url)?.url ?? '';
+    return DC_POST_RE.test(url) ? url : null;
+}
+// 카드의 큰 사진 칸을 바꾼다. name 이 있으면 attachment://name 사진으로 교체, null 이면 사진을 뺀다. 원본은 건드리지 않고 새 JSON 을 돌려준다.
+function setCardImage(json, name) {
+    const c = json[0];
+    const rest = c.components.filter(x => x?.type !== 12);
+    if (!name) return [{ ...c, components: rest }];
+    const title = (rest.find(x => x?.type === 10 && x.content?.startsWith('### '))?.content ?? '').slice(4, 104);
+    const gallery = { type: 12, items: [{ media: { url: `attachment://${name}` }, description: title || undefined }] };
+    const row = rest.find(x => x?.type === 1);
+    const at = row ? rest.indexOf(row) : rest.length;
+    return [{ ...c, components: [...rest.slice(0, at), gallery, ...rest.slice(at)] }];
+}
+// 디시 원글의 작성자와 본문 사진 후보(최대 max개). 사진은 Referer 가 있어야 받아지므로 봇이 내려받아 보여 준다.
+async function fetchPostImages(url, max = 6) {
+    const { author, images } = parse.dcPostInfo(await fetchText(url, { Referer: 'https://gall.dcinside.com/' }));
+    return { author, images: images.slice(0, max) };
+}
+
 // ── 감시 ───────────────────────────────────────────────────────
 // deps: sources, store({ data, save() }), send(source, entry, verdict), now(), logFail(source, err), logInfo(msg) — 테스트에서 바꿔 끼운다.
 function createWatcher({ sources, store, send, update, now = Date.now, logFail = () => {}, logInfo = () => {} }) {
@@ -449,16 +475,9 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
                 // 자동짤방 거르기: 제외 목록의 작성자거나, 같은 작성자가 같은 사진을 전에도 썼으면 사진을 붙이지 않는다
                 state.dcImages ??= {};
                 const imgId = verdict.image ? `${verdict.author ?? '?'}|${verdict.image.key}` : null;
-                if (verdict.image) {
-                    const why = (state.noImage ?? []).includes(verdict.author) ? '제외 목록 작성자' : state.dcImages[imgId] ? '같은 작성자가 같은 사진을 전에도 씀' : null;
-                    // 실전 데이터 수집용 한 줄 기록: 나중에 로그에서 '사진 판정'만 모아 반복 작성자를 찾는다(작성자 | 사진키 끝 12자)
-                    logInfo(`사진 판정 ${why ? '제외' : '붙임'}${why ? `(${why})` : ''} — ${verdict.author ?? '?'} | ${String(verdict.image.key).slice(-12)} | ${e.title.slice(0, 30)}`);
-                    if (why) {
-                        logInfo(`${source.label}: 반복되는 사진(자동짤방 추정)이라 사진 없이 올림 — ${e.title}`);
-                        delete verdict.image;
-                    }
-                } else if (source.id === 'dc' || source.id === 'dcbest') {
-                    logInfo(`사진 판정 없음 — ${verdict.author ?? '?'} | 본문에서 사진을 못 찾음 | ${e.title.slice(0, 30)}`);
+                if (verdict.image && ((state.noImage ?? []).includes(verdict.author) || state.dcImages[imgId])) {
+                    logInfo(`${source.label}: 반복되는 사진(자동짤방 추정)이라 사진 없이 올림 — ${e.title}`);
+                    delete verdict.image;
                 }
                 const messageId = await send(source, e, verdict);
                 if (messageId) state.posted = [...state.posted, { id: messageId, title: String(verdict.title ?? e.title).slice(0, 80), label: source.label, at: now() }].slice(-25);
@@ -529,7 +548,7 @@ function createWatcher({ sources, store, send, update, now = Date.now, logFail =
         state.stats.days[d] = (state.stats.days[d] ?? 0) + 1;
         store.save();
     }
-    return { checkSource, tick, status, posts, forget, recordPost, isNoImage: a => (state.noImage ?? []).includes(a) };
+    return { checkSource, tick, status, posts, forget, recordPost, isNoImage: a => (state.noImage ?? []).includes(a), blockImageAuthor: a => { if (a && !(state.noImage ??= []).includes(a)) { state.noImage.push(a); store.save(); } } };
 }
 
 // 같은 오류가 계속 나도 로그를 도배하지 않게 출처별로 1시간에 한 번만 남긴다.
@@ -568,6 +587,7 @@ async function sendCustomNews(client, fields) {
     console.log(`[소식] 관리자 소식 — ${title}`);
     return message;
 }
+function blockImageAuthor(author) { currentWatcher?.blockImageAuthor(author); }
 function startNewsWatcher(client, store, isPaused = () => false) {
     if (timer) return;
     const sources = buildSources();
@@ -767,6 +787,6 @@ async function previewSamples({ sources, post, edit, emojiIds = {}, wait = ms =>
 }
 
 module.exports = {
-    startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, sendCustomNews, createWatcher, buildSources, buildPayload, stripThumbnailSections, backfillCardImage, NEWS_CHANNEL_ID, EMOJI_NAMES, EmptyListError,
+    startNewsWatcher, getNewsStatus, getNewsPosts, forgetNewsPost, sendCustomNews, createWatcher, buildSources, buildPayload, stripThumbnailSections, backfillCardImage, cardPostUrl, setCardImage, fetchPostImages, downloadImage, blockImageAuthor, NEWS_CHANNEL_ID, EMOJI_NAMES, EmptyListError,
     collectRecent, previewRecent, previewSamples, buildSamples, fetchEmojiIds, NEWS_TEST_GUILD_ID, NEWS_TEST_CHANNEL_ID,
 };
