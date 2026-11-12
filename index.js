@@ -338,12 +338,18 @@ function getRequester(interaction, mode = 'auto') {
     return null;
 }
 
-function buildMonsterPageContainer(monsterData, text, rows, requester = null) {
+function buildMonsterPageContainer(monsterData, text, rows, requester = null, lockButton = null) {
     let accent = 0xFFFFFF;
     try { if (monsterData.color) accent = resolveColor(monsterData.color); } catch (e) { /* 잘못된 색상값이면 흰색 */ }
 
     const container = new ContainerBuilder().setAccentColor(accent);
     const body = new TextDisplayBuilder().setContent(text);
+
+    // 요청자 줄 — 카드 맨 위. 잠금 버튼이 있으면 섹션으로 만들어 버튼을 줄 오른쪽에 붙인다
+    // (본문 섹션은 썸네일이 오른쪽 자리를 쓰고 있어서 따로 둔다)
+    const header = new TextDisplayBuilder().setContent(requester ? `-# 요청자 : ${requester}` : `-# 공개 카드`);
+    if (lockButton) container.addSectionComponents(new SectionBuilder().addTextDisplayComponents(header).setButtonAccessory(lockButton));
+    else if (requester) container.addTextDisplayComponents(header);
 
     if (monsterData.thumbnail) {
         container.addSectionComponents(
@@ -359,7 +365,6 @@ function buildMonsterPageContainer(monsterData, text, rows, requester = null) {
         container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
         container.addActionRowComponents(rows);
     }
-    if (requester) container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# 요청자 : ${requester}`));
     return container;
 }
 
@@ -426,18 +431,21 @@ function pagesFromBlocks(header, blocks, perPage) {
 }
 
 // 기존에 작성하셨던 탭 버튼 로직 100% 원상복구 (버튼 ID 왜곡 방지)
-function getTabButtons(currentTab, monsterName, monsterData, lock = null) {
+function getTabButtons(currentTab, monsterName, monsterData) {
     const row = new ActionRowBuilder();
     row.addComponents(new ButtonBuilder().setCustomId(`list_${monsterName}`).setLabel("목록").setEmoji("📋").setStyle(ButtonStyle.Secondary));
     if (currentTab !== "basic" && monsterData.info) row.addComponents(new ButtonBuilder().setCustomId(`basic_${monsterName}`).setLabel("기본 정보").setEmoji("1492145251941482697").setStyle(ButtonStyle.Secondary));
     if (currentTab !== "hitzone" && monsterData.hitzone) row.addComponents(new ButtonBuilder().setCustomId(`hitzone_${monsterName}`).setLabel("육질 정보").setEmoji("1492145248795758602").setStyle(ButtonStyle.Primary));
     if (currentTab !== "drop" && (monsterData.drop || monsterData.drop_low || monsterData.drop_high)) row.addComponents(new ButtonBuilder().setCustomId(`drop_${monsterName}`).setLabel("소재 정보").setEmoji("1492145247327617185").setStyle(ButtonStyle.Success));
     if (currentTab !== "status" && monsterData.status) row.addComponents(new ButtonBuilder().setCustomId(`status_${monsterName}`).setLabel("상태이상 정보").setEmoji("1492145250192331015").setStyle(ButtonStyle.Danger));
-    const rows = row.components.length > 0 ? [row] : [];
-    // 🔒 잠금 버튼 — 모두가 보는 공개 카드에만, 탭 버튼 아래 별도 줄로 둔다 (lock = { tag: "탭-페이지", locked })
-    if (lock) rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`lock_${monsterName}_${lock.tag}`)
-        .setLabel(lock.locked ? "잠금 중" : "잠금").setEmoji(lock.locked ? "🔒" : "🔓").setStyle(lock.locked ? ButtonStyle.Danger : ButtonStyle.Secondary)));
-    return rows;
+    return row.components.length > 0 ? [row] : [];
+}
+
+// 🔒 잠금 버튼 — 모두가 보는 공개 카드에만. 카드 맨 아래 요청자 줄 오른쪽에 붙는다 (lock = { tag: "탭-페이지", locked })
+function getLockButton(monsterName, lock) {
+    if (!lock) return null;
+    return new ButtonBuilder().setCustomId(`lock_${monsterName}_${lock.tag}`)
+        .setLabel(lock.locked ? "잠금 중" : "잠금").setEmoji(lock.locked ? "🔒" : "🔓").setStyle(lock.locked ? ButtonStyle.Danger : ButtonStyle.Secondary);
 }
 
 // 지금 그리는 메시지가 모두가 보는 공개 카드면 잠금 버튼 정보를 돌려준다 (나만 보는 화면이면 없음)
@@ -1013,10 +1021,11 @@ async function sendPage(interaction, type, monsterName, monsterData, page = 0, m
     // 탭 버튼(기존)과 페이지 버튼(신규)을 안전하게 결합
     const rows = [
         ...getPaginationRow(type, monsterName, page, totalPages),
-        ...getTabButtons(type, monsterName, monsterData, lockInfo(interaction, mode, `${type}-${page}`))
+        ...getTabButtons(type, monsterName, monsterData)
     ];
+    const lockButton = getLockButton(monsterName, lockInfo(interaction, mode, `${type}-${page}`));
 
-    return respondWithContainer(interaction, buildMonsterPageContainer(monsterData, pages[page], rows, getRequester(interaction, mode)), mode);
+    return respondWithContainer(interaction, buildMonsterPageContainer(monsterData, pages[page], rows, getRequester(interaction, mode), lockButton), mode);
 }
 
 // 소재 전용 페이지 역시 기존 마크다운 구축 로직 100% 복구
@@ -1041,10 +1050,11 @@ async function sendDropPage(interaction, rankKey, monsterName, monsterData, page
     const rows = [
         ...getPaginationRow(currentAction, monsterName, page, totalPages),
         rankRow,
-        ...getTabButtons("drop", monsterName, monsterData, lockInfo(interaction, mode, `${currentAction}-${page}`))
+        ...getTabButtons("drop", monsterName, monsterData)
     ];
+    const lockButton = getLockButton(monsterName, lockInfo(interaction, mode, `${currentAction}-${page}`));
 
-    await respondWithContainer(interaction, buildMonsterPageContainer(monsterData, pages[page], rows, getRequester(interaction, mode)), mode);
+    await respondWithContainer(interaction, buildMonsterPageContainer(monsterData, pages[page], rows, getRequester(interaction, mode), lockButton), mode);
 }
 
 loadState(); // 재시작 전에 올린 공개 메시지·목록 기록 불러오기
